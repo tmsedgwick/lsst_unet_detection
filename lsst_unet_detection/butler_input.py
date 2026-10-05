@@ -73,6 +73,15 @@ def extract_inputs(exposures, bands=BANDS, stamp_size=CONFIG["psf_stamp"]):
     return signal, variance, psf_kernels
 
 
+def save_coadd(path, exposures, bands=BANDS, stamp_size=CONFIG["psf_stamp"]):
+    """Save {band: exposure} as an .npz with signal, variance, psf_kernels, bands and origin (the tract pixel of the
+    array's corner), the input of scripts/review_detections.py."""
+    signal, variance, psf_kernels = extract_inputs(exposures, bands, stamp_size)
+    corner = exposures[bands[0]].getBBox()
+    np.savez(path, signal=signal, variance=variance, psf_kernels=psf_kernels, bands=np.array(bands),
+             origin=np.array([corner.getMinX(), corner.getMinY()]))
+
+
 def neutralise_bad_pixels(signal, variance, factor=CONFIG["bad_pixel_variance_factor"]):
     """Copies of signal and variance with NaN / non-positive-variance pixels set to zero signal and a huge variance
     (factor x the band's 99.9th-percentile variance), so they read as pure noise instead of spreading NaNs."""

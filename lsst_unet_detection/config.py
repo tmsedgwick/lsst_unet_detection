@@ -1,7 +1,7 @@
 """Default settings for running a trained U-Net on LSST deep coadds.
 
-Network and tiling settings are read from each model's own model config when it has one (models trained with
-lsst_unet_training do); these defaults cover models trained in the original notebook.
+Network and tiling settings are read from each model's own model config (written by lsst_unet_training); these
+defaults are used for any setting a model config does not give.
 """
 
 from typing import Any
@@ -19,6 +19,12 @@ CONFIG: dict[str, Any] = dict(
     # Pixels with NaN or non-positive variance (NO_DATA, chip gaps) get zero signal and this multiple of the band's
     # 99.9th-percentile variance, so the network ignores them.
     bad_pixel_variance_factor=1e6,
+    # Classical peak finder (peak_finder.py), the comparison for the U-Net: S/N threshold on the PSF-smoothed image,
+    # footprint growth in PSF widths, the radius within which peaks from different bands are one detection, and the
+    # box size of the local background used to split crowded footprints.
+    peak_threshold_sn=5.0, peak_grow_sigmas=2.4, peak_merge_radius_pix=5.0, peak_background_bin_pix=65,
+    # Visual review (review.py): U-Net and peak-finder detections closer than this are the same object.
+    review_match_radius_pix=3.0,
     # Butler defaults for Rubin Data Preview 2.
     butler_repo="dp2", collections="dp2", skymap="lsst_cells_v2", dataset="deep_coadd",
 )

@@ -12,7 +12,7 @@ The catalogue has pixel (x, y), tract pixel (x_tract, y_tract) and sky (ra, dec)
 import argparse
 from pathlib import Path
 
-from lsst_unet_detection import BANDS, CONFIG, cutout_bbox, detect_galaxies, load_deep_coadds, load_detector
+from lsst_unet_detection import BANDS, CONFIG, cutout_bbox, detect_galaxies, load_deep_coadds, load_detector, save_coadd
 
 
 def main():
@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--collections", default=CONFIG["collections"], help="default: %(default)s")
     parser.add_argument("--skymap", default=CONFIG["skymap"], help="default: %(default)s")
     parser.add_argument("--threshold", type=float, help="override the model's calibrated p_real threshold")
+    parser.add_argument("--save-coadd", type=Path,
+                        help="also save the loaded coadd as an .npz, for scripts/review_detections.py")
     args = parser.parse_args()
     by_patch = args.tract is not None and args.patch is not None
     by_position = args.ra is not None and args.dec is not None
@@ -46,6 +48,10 @@ def main():
         tract, patch, bbox = cutout_bbox(butler, args.ra, args.dec, args.size, args.skymap)
     print(f"Loading {''.join(BANDS)} deep_coadd for tract {tract}, patch {patch}" + (f", {bbox}" if bbox else ""))
     coadds = load_deep_coadds(butler, tract, patch, bbox=bbox, skymap=args.skymap)
+    if args.save_coadd is not None:
+        args.save_coadd.parent.mkdir(parents=True, exist_ok=True)
+        save_coadd(args.save_coadd, coadds)
+        print(f"Saved the coadd -> {args.save_coadd}")
     detections = detect_galaxies(coadds, detector).assign(tract=tract, patch=patch, model=detector.name)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     if args.out.suffix == ".parquet":

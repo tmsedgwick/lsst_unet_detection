@@ -67,7 +67,7 @@ of the stack:
 ```bash
 git clone https://github.com/tmsedgwick/lsst_unet_detection.git
 cd lsst_unet_detection
-pip install --user -e . tensorflow scikit-learn
+pip install --user -e . tensorflow scikit-learn matplotlib
 ```
 
 For work without the Butler (e.g. running the tests, or on arrays you already have), a plain environment is enough:
@@ -125,8 +125,45 @@ pytest -q
 ```
 
 The tests use stand-in exposure objects with the afw Exposure interface and a small untrained model, so they run
-without the LSST stack. GitHub Actions runs them on every push. On a real DP2 patch (tract 2877, patch 34) the
-detector reproduces the original `mep_unet_infer.py` exactly: the same 12,749 detections with identical scores.
+without the LSST stack. GitHub Actions runs them on every push.
+
+## Reviewing detections by eye
+
+To learn where the U-Net succeeds and fails, compare it with a classical peak finder and label the disagreements.
+`scripts/review_detections.py` runs both on a saved coadd, matches their detections within 3 pixels, and opens a
+window that steps through one kind of candidate in a **random order** (fixed by `--seed`), so whatever you have
+reviewed so far is a random sample:
+
+- `--unet-only`: U-Net detections the peak finder did not make
+- `--peakfinder-only`: peak-finder detections the U-Net did not make
+- `--below-threshold`: U-Net peaks with p_real between `--min-p-real` (default 0.5) and the threshold, to judge
+  whether the threshold could be lowered
+
+The peak finder (`peak_finder.py`) approximates LSST source detection: per band, a PSF-matched smoothing, an S/N >= 5
+threshold, footprints grown by 2.4 PSF widths, peaks within footprints (crowded footprints re-split after a local
+background subtraction), then peaks from all bands within 5 pixels merged.
+
+The window shows a g r i colour cutout, the combined S/N and the PSF-matched S/N, with the other detections marked
+(magenta ○ U-Net only, orange □ peak finder only, white ○ both, blue ◇ below threshold; ✓ / ✗ / ~ once reviewed).
+Keys: `r` real, `s` spurious, `u` unsure, `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0`
+reset zoom, `m` markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits.
+
+Every decision is saved to the `--out` JSON, which is the label format lsst_unet_training's
+`update_threshold_on_aux.py` and `update_weights_on_aux.py` read. All detections are saved beside it
+(`<out>.candidates.parquet`), so running the same command again continues where you stopped, with the same
+candidates in the same order.
+
+```bash
+# Save the coadd while detecting (needs the LSST stack); the review itself does not need the stack
+python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --tract 2877 --patch 34 --out ~/detections/tract2877_patch34.parquet --save-coadd ~/coadds/tract2877_patch34.npz
+
+# Review U-Net-only detections, then peak-finder-only ones (each in its own window; rerun to continue)
+python scripts/review_detections.py --coadd ~/coadds/tract2877_patch34.npz --model mep_unet --models-root ~/unet_models --unet-only --out ~/review/feedback_unet_only.json
+python scripts/review_detections.py --coadd ~/coadds/tract2877_patch34.npz --model mep_unet --models-root ~/unet_models --peakfinder-only --out ~/review/feedback_peakfinder_only.json
+
+# U-Net peaks just below the threshold
+python scripts/review_detections.py --coadd ~/coadds/tract2877_patch34.npz --model mep_unet --models-root ~/unet_models --below-threshold --out ~/review/feedback_unet_below_threshold.json
+```
 
 ## Repository layout
 
@@ -137,7 +174,10 @@ detector reproduces the original `mep_unet_infer.py` exactly: the same 12,749 de
 | `lsst_unet_detection/unet_model.py` | the network (identical to lsst_unet_training's) |
 | `lsst_unet_detection/detector.py` | loading a model by name; tiled inference, peaks and calibration |
 | `lsst_unet_detection/pipeline.py` | exposures → catalogue with sky coordinates |
-| `scripts/detect_galaxies.py` | command-line entry point |
+| `lsst_unet_detection/peak_finder.py` | classical LSST-like peak finder, the comparison for the U-Net |
+| `lsst_unet_detection/review.py` | candidate lists, random-order review sessions and the review window |
+| `scripts/detect_galaxies.py` | command-line detection (optionally saving the coadd) |
+| `scripts/review_detections.py` | command-line visual review |
 | `tests/` | pytest suite |
 
 ## Licence

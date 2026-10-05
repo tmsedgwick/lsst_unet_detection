@@ -109,15 +109,19 @@ class Detector:
             rows.append((float(x0 + x - halo + dx), float(y0 + y - halo + dy), float(heatmap[y, x]), re_pix))
         return rows
 
+    def scored_peaks(self, signal, variance, psf_kernels):
+        """Every heatmap peak above min_peak_score with its calibrated p_real, whether or not it passes the
+        threshold."""
+        peaks = self.raw_peaks(signal, variance, psf_kernels)
+        peaks["p_real"] = self.calibrator.predict(peaks["raw_score"]) if len(peaks) else np.empty(0)
+        return peaks
+
     def detect(self, signal, variance, psf_kernels):
         """Detections with p_real >= threshold: x, y (array pixels), raw_score, p_real and, when the model knows its
         size scaling, predicted_re_pix. signal and variance are (band, y, x) in nJy; psf_kernels is
         (stamp, stamp, band)."""
-        peaks = self.raw_peaks(signal, variance, psf_kernels)
-        p_real = self.calibrator.predict(peaks["raw_score"]) if len(peaks) else np.empty(0)
-        peaks["p_real"] = p_real
-        keep = np.asarray(p_real, float) >= self.threshold
-        return peaks.loc[keep].reset_index(drop=True)
+        peaks = self.scored_peaks(signal, variance, psf_kernels)
+        return peaks.loc[peaks["p_real"].to_numpy(float) >= self.threshold].reset_index(drop=True)
 
 
 def load_detector(model, models_root=None, threshold=None):

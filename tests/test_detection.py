@@ -1,17 +1,15 @@
 """Checks of PSF stamps, bad-pixel handling, model lookup and the full exposure -> catalogue path, using stand-in
 objects with the afw Exposure interface (so the LSST stack is not needed) and a small untrained model."""
 
-import json
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from lsst_unet_detection import ARTEFACTS, BANDS, CONFIG, detect_galaxies, extract_inputs, load_detector
+from lsst_unet_detection import BANDS, detect_galaxies, extract_inputs, load_detector
 from lsst_unet_detection.butler_input import neutralise_bad_pixels, psf_stamp
 from lsst_unet_detection.pipeline import suppress_duplicates
-from lsst_unet_detection.unet_model import build_unet
 
 SIZE, CORNER = 300, (1000, 2000)  # image side and its tract-pixel corner
 
@@ -58,24 +56,6 @@ def exposures():
     scene = sum(500 * np.exp(-0.5 * ((xx - x) ** 2 + (yy - y) ** 2) / 4.0) for x, y in rng.uniform(20, 280, (20, 2)))
     return {band: FakeExposure((scene + rng.normal(0, 1, (SIZE, SIZE))).astype(np.float32),
                                np.ones((SIZE, SIZE), np.float32), 2.2) for band in BANDS}
-
-
-@pytest.fixture(scope="module")
-def models_root(tmp_path_factory):
-    """A models folder holding one small untrained model, 'tiny', in the lsst_unet_training layout."""
-    root = tmp_path_factory.mktemp("models")
-    model_dir = root / "tiny"
-    model_dir.mkdir()
-    cfg = {**CONFIG, "base_filters": 8}
-    build_unet(cfg).save_weights(model_dir / ARTEFACTS["weights"])
-    normalisation = dict(logvar_centre=[0.0] * 6, logvar_scale=[1.0] * 6)
-    (model_dir / ARTEFACTS["normalisation"]).write_text(json.dumps(normalisation))
-    (model_dir / ARTEFACTS["model_config"]).write_text(json.dumps(dict(cfg=dict(base_filters=8), log_re_mean=0.8,
-                                                                       log_re_std=0.5)))
-    scores = np.linspace(0, 1, 200)
-    pd.DataFrame(dict(raw_score=scores, label_real=scores > 0.5)).to_parquet(model_dir / ARTEFACTS["calib_peaks"])
-    (model_dir / ARTEFACTS["threshold"]).write_text(json.dumps(dict(threshold=0.5)))
-    return root
 
 
 def test_psf_stamp_is_centred_unit_sum():
