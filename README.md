@@ -148,6 +148,7 @@ them: the cyan + is the candidate being reviewed, and the other detections are m
 (magenta ○ U-Net only, orange □ peak finder only, white ○ both, blue ◇ below threshold; ✓ / ✗ / ~ once reviewed).
 Keys: `r` real, `s` spurious, `u` unsure, `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0`
 reset zoom, `m` markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits.
+Click the marker of another candidate of the same kind to review it straight away; `b` goes back to where you were.
 
 Every decision is saved to the `--out` JSON, which is the label format lsst_unet_training's
 `update_threshold_on_aux.py` and `update_weights_on_aux.py` read. All detections are saved beside it

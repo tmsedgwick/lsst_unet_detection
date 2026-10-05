@@ -205,7 +205,8 @@ def snr_images(signal, variance, sigma):
     return stacked, filtered
 
 
-HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   "
+HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   click a marker: review it   "
+        "b back   "
         "+ / − zoom   0 reset zoom   m markers on/off   shift+click mark a missed source   x undo missed   q quit")
 MARKERS = dict(both=("o", "white"), unet_only=("o", "magenta"), peakfinder_only=("s", "orange"),
                unet_below_threshold=("D", "deepskyblue"))
@@ -228,6 +229,8 @@ class ReviewWindow:
         self.sigma = float(np.median([psf_sigma_pix(psf_kernels[..., b]) for b in range(len(bands))]))
         self.half_width, self.show_markers = self.START_HALF_WIDTH, True
         self.position = session.next_unreviewed() or 0
+        self.return_position = None  # where to go back to (key b) after clicking through to another candidate
+        self.position_of = np.argsort(session.order)  # candidate id -> its position in the review order
         self.figure, self.axes = plt.subplots(1, 3, figsize=(14, 5.4))
         self.figure.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.12, wspace=0.03)
         self.figure.text(0.5, 0.02, HELP, ha="center", fontsize=8.5, color="0.3")
@@ -331,6 +334,9 @@ class ReviewWindow:
             self.go_to(self.position + 1)
         elif key == "left":
             self.go_to(self.position - 1)
+        elif key == "b" and self.return_position is not None:
+            self.go_to(self.return_position)
+            self.return_position = None
         elif key == "f":
             self.go_to(self.session.next_unreviewed() or 0)
         elif key in ("+", "="):
@@ -353,6 +359,20 @@ class ReviewWindow:
             plt.close(self.figure)
 
     def on_click(self, event):
-        if event.inaxes in self.axes and event.xdata is not None and "shift" in (event.key or ""):
+        """Shift+click marks a missed source; a plain click on a marker of a candidate in this review jumps to it."""
+        if event.inaxes not in self.axes or event.xdata is None:
+            return
+        if "shift" in (event.key or ""):
             self.session.add_missed(event.xdata, event.ydata, self.position)
             self.draw()
+            return
+        candidates = self.session.candidates
+        distance = np.hypot(candidates["x"].to_numpy() - event.xdata, candidates["y"].to_numpy() - event.ydata)
+        nearest = int(np.argmin(distance)) if len(distance) else None
+        if nearest is None or distance[nearest] > max(3.0, self.half_width / 12):
+            return  # not on a candidate of this review (other kinds of detection cannot be labelled here)
+        position = int(self.position_of[nearest])
+        if position != self.position:
+            if self.return_position is None:
+                self.return_position = self.position
+            self.go_to(position)

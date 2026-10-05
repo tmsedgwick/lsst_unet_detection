@@ -114,8 +114,13 @@ def test_window_keys(coadd, tmp_path):
     window.on_key(SimpleNamespace(key="+"))
     assert window.half_width < window.START_HALF_WIDTH
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=12.0, ydata=13.0, key="shift"))
-    window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=40.0, ydata=40.0, key=None))  # plain click: nothing
     assert len(session.feedback["missed"]) == 1
+    here = window.position
+    target = session.candidates.iloc[session.order[here + 3]]  # click another candidate's marker: jump to it
+    window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=target["x"] + 0.5, ydata=target["y"], key=None))
+    assert window.position == here + 3
+    window.on_key(SimpleNamespace(key="b"))  # and back
+    assert window.position == here
     window.on_key(SimpleNamespace(key="x"))
     assert session.feedback["missed"] == []
     window.on_key(SimpleNamespace(key="f"))
