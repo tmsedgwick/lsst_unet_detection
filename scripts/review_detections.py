@@ -11,7 +11,7 @@ failures. Runs on a coadd saved as .npz (e.g. by detect_galaxies.py --save-coadd
 Every decision is saved straight away. Run the same command again to continue where you stopped: the candidates and
 their order are read back from <out>.candidates.parquet, so the model is not run again. Keys:
 
-    r real   s spurious   u unsure   n / p: next / previous   f: first unreviewed
+    r real   s spurious   u unsure   right / left arrow: next / previous   f: first unreviewed
     + / -: zoom   0: reset zoom   m: markers on / off   shift+click: mark a missed source   x: undo missed   q: quit
     click a marker: review that candidate   b: back to where you were
 """

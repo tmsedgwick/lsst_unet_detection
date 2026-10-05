@@ -207,7 +207,7 @@ def snr_images(signal, variance, sigma):
     return stacked, filtered
 
 
-HELP = ("r real   s spurious   u unsure   n / p next / previous   f first unreviewed   click a marker: review it   "
+HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   click a marker: review it   "
         "b back   "
         "+ / − zoom   0 reset zoom   m markers on/off   shift+click mark a missed source   x undo missed   q quit")
 MARKERS = dict(both=("o", "white"), unet_only=("o", "magenta"), peakfinder_only=("s", "orange"),
@@ -231,12 +231,14 @@ class ReviewWindow:
         self.sigma = float(np.median([psf_sigma_pix(psf_kernels[..., b]) for b in range(len(bands))]))
         self.half_width, self.show_markers = self.START_HALF_WIDTH, True
         self.position = session.next_unreviewed() or 0
+        self.message = ""  # a one-line notice shown under the title, e.g. about a key that does nothing
         self.return_position = None  # where to go back to (key b) after clicking through to another candidate
         self.position_of = np.argsort(session.order)  # candidate id -> its position in the review order
         self.figure, self.axes = plt.subplots(1, 3, figsize=(14, 5.4))
-        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.12, wspace=0.03)
+        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.80, bottom=0.12, wspace=0.03)
         self.figure.text(0.5, 0.02, HELP, ha="center", fontsize=8.5, color="0.3")
         self.add_key()
+        self.status = self.figure.text(0.5, 0.855, "", ha="center", fontsize=10, color="#d62728")
         self.figure.canvas.mpl_connect("key_press_event", self.on_key)
         self.figure.canvas.mpl_connect("button_press_event", self.on_click)
         self.draw()
@@ -328,6 +330,7 @@ class ReviewWindow:
             f"order   ·   {score}   ·   {decision}\n{session.n_reviewed} reviewed, {len(session.feedback['missed'])} "
             f"missed sources marked   ·   pixel ({cx:.0f}, {cy:.0f})   ·   saving to {session.path.name}",
             fontsize=10.5)
+        self.status.set_text(self.message)
         self.figure.canvas.draw_idle()
 
     def go_to(self, position):
@@ -335,14 +338,17 @@ class ReviewWindow:
         self.draw()
 
     def on_key(self, event):
-        key = event.key or ""
+        raw_key = event.key or ""
+        # Arrow keys can arrive with modifiers attached on some systems (e.g. "fn+right" on a Mac): ignore those.
+        key = next((arrow for arrow in ("left", "right") if raw_key.endswith(arrow)), raw_key)
+        self.message = ""
         if key in ("r", "s", "u"):
             self.session.decide(self.position, dict(r="real", s="spurious", u="unsure")[key])
             following = self.session.next_unreviewed(self.position + 1)
             self.go_to(self.position + 1 if following is None else following)
-        elif key in ("n", "right"):
+        elif key == "right":
             self.go_to(self.position + 1)
-        elif key in ("p", "left"):
+        elif key == "left":
             self.go_to(self.position - 1)
         elif key == "b" and self.return_position is not None:
             self.go_to(self.return_position)
@@ -367,6 +373,9 @@ class ReviewWindow:
         elif key == "q":
             import matplotlib.pyplot as plt
             plt.close(self.figure)
+        elif raw_key not in ("shift", "control", "alt", "cmd", "super", "fn"):  # a lone modifier press is harmless
+            self.message = f"key '{raw_key}' does nothing (see the keys listed at the bottom)"
+            self.draw()
 
     def on_click(self, event):
         """Shift+click marks a missed source; a plain click on a marker of a candidate in this review jumps to it."""
