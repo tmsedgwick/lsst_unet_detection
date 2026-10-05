@@ -13,7 +13,7 @@ their order are read back from <out>.candidates.parquet, so the model is not run
 
     r real   s spurious   u unsure   right / left arrow: next / previous   f: first unreviewed
     + / -: zoom   0: reset zoom   m: markers on / off   shift+click: mark a missed source   x: undo missed   q: quit
-    click a marker: review that candidate   b: back to where you were
+    click markers: select them; r / s / u then label the selection and stay put   esc: deselect
 """
 
 import argparse

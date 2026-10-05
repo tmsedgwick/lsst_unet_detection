@@ -13,11 +13,13 @@ the category, however many there are. The labels are saved to a feedback JSON fi
 
   {"category": ..., "n": number of candidates, "order": "random", "seed": ..., "coadd": ..., "model": ...,
    "threshold": ..., "origin": [x0, y0],
-   "reviewed": {candidate id: {"x", "y", "x_patch", "y_patch", "score", "decision"}, ...},
+   "reviewed": {candidate id: {"x", "y", "x_patch", "y_patch", "score", "decision", "how"}, ...},
    "missed": [{"x", "y", "x_patch", "y_patch", "near_candidate"}, ...]}
 
-decision is "real" (a genuine source), "spurious" (an artefact or noise) or "unsure"; "missed" lists sources the
-reviewer spotted that no detection caught. x, y are pixels of the coadd array and x_patch, y_patch add its origin.
+decision is "real" (a genuine source), "spurious" (an artefact or noise) or "unsure"; how is "random" if the candidate
+came up in the random order and "selected" if the reviewer clicked it, since only the random ones are an unbiased
+sample of the category. "missed" lists sources the reviewer spotted that no detection caught. x, y are pixels of
+the coadd array and x_patch, y_patch add its origin.
 This is the label format lsst_unet_training's update_threshold_on_aux.py and update_weights_on_aux.py read.
 
 All detections are saved next to the JSON (<name>.candidates.parquet) when a review starts, so reopening it
@@ -165,13 +167,19 @@ class ReviewSession:
         return None
 
     def decide(self, position, decision):
+        """Label the candidate at a position in the random order."""
+        self.label(self.candidate(position)[0], decision, how="random")
+
+    def label(self, candidate_id, decision, how):
+        """Save a decision for a candidate. how records whether it came up in the random order ("random") or was
+        picked by clicking ("selected"); only the random ones form an unbiased sample of the category."""
         if decision not in DECISIONS:
             raise ValueError(f"decision {decision!r}: choose from {DECISIONS}")
-        candidate_id, row = self.candidate(position)
+        row = self.candidates.iloc[int(candidate_id)]
         score = row["p_real"] if np.isfinite(row["p_real"]) else row["peak_sn"]
-        self.feedback["reviewed"][str(candidate_id)] = dict(
+        self.feedback["reviewed"][str(int(candidate_id))] = dict(
             x=float(row["x"]), y=float(row["y"]), x_patch=float(row["x"]) + self.origin[0],
-            y_patch=float(row["y"]) + self.origin[1], score=float(score), decision=decision)
+            y_patch=float(row["y"]) + self.origin[1], score=float(score), decision=decision, how=how)
         self.save()
 
     def add_missed(self, x, y, position):
@@ -207,8 +215,8 @@ def snr_images(signal, variance, sigma):
     return stacked, filtered
 
 
-HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   click a marker: review it   "
-        "b back   "
+HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   "
+        "click markers to select them, then r / s / u labels them   esc deselect\n"
         "+ / − zoom   0 reset zoom   m markers on/off   shift+click mark a missed source   x undo missed   q quit")
 MARKERS = dict(both=("o", "white"), unet_only=("o", "magenta"), peakfinder_only=("s", "orange"),
                unet_below_threshold=("D", "deepskyblue"))
@@ -232,11 +240,10 @@ class ReviewWindow:
         self.half_width, self.show_markers = self.START_HALF_WIDTH, True
         self.position = session.next_unreviewed() or 0
         self.message = ""  # a one-line notice shown under the title, e.g. about a key that does nothing
-        self.return_position = None  # where to go back to (key b) after clicking through to another candidate
-        self.position_of = np.argsort(session.order)  # candidate id -> its position in the review order
+        self.selected = []  # ids of candidates picked by clicking; r / s / u label these instead of the centre one
         self.figure, self.axes = plt.subplots(1, 3, figsize=(14, 5.4))
-        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.80, bottom=0.12, wspace=0.03)
-        self.figure.text(0.5, 0.02, HELP, ha="center", fontsize=8.5, color="0.3")
+        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.80, bottom=0.14, wspace=0.03)
+        self.figure.text(0.5, 0.008, HELP, ha="center", va="bottom", fontsize=8.5, color="0.3", linespacing=1.5)
         self.add_key()
         self.status = self.figure.text(0.5, 0.855, "", ha="center", fontsize=10, color="#d62728")
         self.figure.canvas.mpl_connect("key_press_event", self.on_key)
@@ -260,7 +267,7 @@ class ReviewWindow:
                    symbol("x", "yellow", "missed source you marked")]
         handles.append(Line2D([], [], ls="none", marker="none",
                               label="✓ / ✗ / ~  reviewed real / spurious / unsure"))
-        self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.045), ncol=len(handles),
+        self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.06), ncol=len(handles),
                            fontsize=8, frameon=False, handletextpad=0.3, columnspacing=1.2)
 
     def cutout(self, cube, cx, cy, half_width=None):
@@ -317,6 +324,10 @@ class ReviewWindow:
             for missed in session.feedback["missed"]:
                 if abs(missed["x"] - cx) <= h and abs(missed["y"] - cy) <= h:
                     ax.plot(missed["x"], missed["y"], "x", color="yellow", ms=12, mew=2)
+            for candidate_id in self.selected:
+                chosen = session.candidates.iloc[candidate_id]
+                ax.scatter([chosen["x"]], [chosen["y"]], s=380, marker="o", facecolors="none", edgecolors="yellow",
+                           linewidths=3)
             ax.plot(cx, cy, "+", color="cyan", ms=16, mew=2)
             ax.set_xlim(extent[:2])
             ax.set_ylim(extent[2:])
@@ -335,6 +346,7 @@ class ReviewWindow:
 
     def go_to(self, position):
         self.position = int(np.clip(position, 0, len(self.session.order) - 1))
+        self.selected = []
         self.draw()
 
     def on_key(self, event):
@@ -342,17 +354,24 @@ class ReviewWindow:
         # Arrow keys can arrive with modifiers attached on some systems (e.g. "fn+right" on a Mac): ignore those.
         key = next((arrow for arrow in ("left", "right") if raw_key.endswith(arrow)), raw_key)
         self.message = ""
-        if key in ("r", "s", "u"):
+        if key in ("r", "s", "u") and self.selected:
+            decision = dict(r="real", s="spurious", u="unsure")[key]
+            for candidate_id in self.selected:
+                self.session.label(candidate_id, decision, how="selected")
+            self.message = f"labelled {len(self.selected)} selected detection(s) {decision}"
+            self.selected = []
+            self.draw()  # stay on the current candidate
+        elif key in ("r", "s", "u"):
             self.session.decide(self.position, dict(r="real", s="spurious", u="unsure")[key])
             following = self.session.next_unreviewed(self.position + 1)
             self.go_to(self.position + 1 if following is None else following)
+        elif key == "escape":
+            self.selected = []
+            self.draw()
         elif key == "right":
             self.go_to(self.position + 1)
         elif key == "left":
             self.go_to(self.position - 1)
-        elif key == "b" and self.return_position is not None:
-            self.go_to(self.return_position)
-            self.return_position = None
         elif key == "f":
             self.go_to(self.session.next_unreviewed() or 0)
         elif key in ("+", "="):
@@ -378,20 +397,36 @@ class ReviewWindow:
             self.draw()
 
     def on_click(self, event):
-        """Shift+click marks a missed source; a plain click on a marker of a candidate in this review jumps to it."""
+        """Shift+click marks a missed source. A plain click on a marker selects that detection (or deselects it) if it
+        is a candidate of this review; otherwise the notice line says why it cannot be labelled here."""
         if event.inaxes not in self.axes or event.xdata is None:
             return
         if "shift" in (event.key or ""):
             self.session.add_missed(event.xdata, event.ydata, self.position)
+            self.message = "marked a missed source (x undoes it)"
             self.draw()
             return
+        radius = max(3.0, self.half_width / 12)  # how close to a marker a click must be, in pixels
+        detections = self.session.detections
+        distance = np.hypot(detections["x"].to_numpy() - event.xdata, detections["y"].to_numpy() - event.ydata)
+        if not len(distance) or distance.min() > radius:
+            self.message = "no detection there: click on a marker"
+            self.draw()
+            return
+        clicked = detections.iloc[int(np.argmin(distance))]
+        category = self.session.feedback["category"]
         candidates = self.session.candidates
-        distance = np.hypot(candidates["x"].to_numpy() - event.xdata, candidates["y"].to_numpy() - event.ydata)
-        nearest = int(np.argmin(distance)) if len(distance) else None
-        if nearest is None or distance[nearest] > max(3.0, self.half_width / 12):
-            return  # not on a candidate of this review (other kinds of detection cannot be labelled here)
-        position = int(self.position_of[nearest])
-        if position != self.position:
-            if self.return_position is None:
-                self.return_position = self.position
-            self.go_to(position)
+        same = np.flatnonzero((candidates["x"].to_numpy() == clicked["x"])
+                              & (candidates["y"].to_numpy() == clicked["y"]))
+        if clicked["category"] != category or not len(same):
+            self.message = (f"that is a {clicked['category'].replace('_', ' ')} detection; this window labels only "
+                            f"{category.replace('_', ' ')} ones")
+        elif int(self.session.order[self.position]) == int(same[0]):
+            self.message = "that is the candidate being reviewed: press r / s / u"
+        elif int(same[0]) in self.selected:
+            self.selected.remove(int(same[0]))
+            self.message = f"deselected; {len(self.selected)} selected"
+        else:
+            self.selected.append(int(same[0]))
+            self.message = f"{len(self.selected)} selected: press r / s / u to label, esc to deselect"
+        self.draw()

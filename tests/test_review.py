@@ -121,11 +121,19 @@ def test_window_keys(coadd, tmp_path):
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=12.0, ydata=13.0, key="shift"))
     assert len(session.feedback["missed"]) == 1
     here = window.position
-    target = session.candidates.iloc[session.order[here + 3]]  # click another candidate's marker: jump to it
+    clicked = int(session.order[here + 3])  # click another candidate's marker: it is selected, the view stays put
+    target = session.candidates.iloc[clicked]
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=target["x"] + 0.5, ydata=target["y"], key=None))
-    assert window.position == here + 3
-    window.on_key(SimpleNamespace(key="b"))  # and back
-    assert window.position == here
+    assert window.position == here and window.selected == [clicked] and "1 selected" in window.status.get_text()
+    window.on_key(SimpleNamespace(key="s"))  # labels the selection only, and stays on the current candidate
+    assert window.position == here and window.selected == []
+    saved = session.feedback["reviewed"][str(clicked)]
+    assert saved["decision"] == "spurious" and saved["how"] == "selected"
+    other = session.detections[session.detections["category"] != "unet_only"].iloc[0]
+    window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=other["x"], ydata=other["y"], key=None))
+    assert window.selected == [] and "this window labels only unet only" in window.status.get_text()
+    window.on_key(SimpleNamespace(key="fn+right"))  # as a Mac may send it
+    assert window.position == here + 1
     window.on_key(SimpleNamespace(key="x"))
     assert session.feedback["missed"] == []
     window.on_key(SimpleNamespace(key="f"))
