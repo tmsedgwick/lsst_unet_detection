@@ -111,8 +111,13 @@ def test_window_keys(coadd, tmp_path):
     assert session.decision(start) == "spurious" and window.position == start + 1
     window.on_key(SimpleNamespace(key="left"))
     assert window.position == start
+    centre_colour = lambda: window.axes[0].images[0].get_array()[window.half_width, window.half_width].copy()
+    before = centre_colour()
+    window.on_key(SimpleNamespace(key="-"))  # zooming out shows more but must not change brightness or contrast
+    assert np.allclose(centre_colour(), before)
+    window.on_key(SimpleNamespace(key="0"))
     window.on_key(SimpleNamespace(key="+"))
-    assert window.half_width < window.START_HALF_WIDTH
+    assert window.half_width < window.START_HALF_WIDTH and np.allclose(centre_colour(), before)
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=12.0, ydata=13.0, key="shift"))
     assert len(session.feedback["missed"]) == 1
     here = window.position

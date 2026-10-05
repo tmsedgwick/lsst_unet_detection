@@ -186,10 +186,12 @@ class ReviewSession:
             self.save()
 
 
-def colour_image(g, r, i, low_percentile=1.0, high_percentile=99.5, softening=10.0):
-    """An RGB image (i, r, g as red, green, blue) with a shared arcsinh stretch between two percentiles."""
+DISPLAY_PERCENTILES = (1.0, 99.5)  # display range of each panel, from the default-zoom cutout
+
+
+def colour_image(g, r, i, low, high, softening=10.0):
+    """An RGB image (i, r, g as red, green, blue) with a shared arcsinh stretch from low to high (nJy)."""
     stack = np.stack([i, r, g], axis=-1)
-    low, high = np.nanpercentile(stack, [low_percentile, high_percentile])
     scaled = np.clip((stack - low) / max(float(high - low), 1e-12), 0.0, None)
     return np.clip(np.arcsinh(softening * scaled) / np.arcsinh(softening), 0.0, 1.0)
 
@@ -259,8 +261,8 @@ class ReviewWindow:
         self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.045), ncol=len(handles),
                            fontsize=8, frameon=False, handletextpad=0.3, columnspacing=1.2)
 
-    def cutout(self, cube, cx, cy):
-        h = self.half_width
+    def cutout(self, cube, cx, cy, half_width=None):
+        h = self.half_width if half_width is None else half_width
         x0, y0 = int(round(cx)) - h, int(round(cy)) - h
         out = np.zeros((cube.shape[0], 2 * h + 1, 2 * h + 1), np.float32)
         xa, xb, ya, yb = max(0, x0), min(cube.shape[2], x0 + 2 * h + 1), max(0, y0), min(cube.shape[1], y0 + 2 * h + 1)
@@ -274,12 +276,20 @@ class ReviewWindow:
         signal, extent = self.cutout(self.signal, cx, cy)
         variance, _ = self.cutout(self.variance, cx, cy)
         stacked, filtered = snr_images(signal.astype(float), variance.astype(float), self.sigma)
+        # The display ranges always come from the default-size cutout, so zooming in or out changes only how much is
+        # shown, never the brightness or contrast.
+        reference_signal, _ = self.cutout(self.signal, cx, cy, self.START_HALF_WIDTH)
+        reference_variance, _ = self.cutout(self.variance, cx, cy, self.START_HALF_WIDTH)
+        colour_range = np.nanpercentile(reference_signal[self.colour_bands], DISPLAY_PERCENTILES)
+        reference_snr = snr_images(reference_signal.astype(float), reference_variance.astype(float), self.sigma)
+        colour = [signal[b] for b in self.colour_bands]
         for ax in self.axes:
             ax.clear()
-        self.axes[0].imshow(colour_image(*(signal[b] for b in self.colour_bands)), origin="lower", extent=extent)
-        for ax, image, title in [(self.axes[1], stacked, "S/N, all bands combined"),
-                                 (self.axes[2], filtered, f"S/N after PSF-matched filter (σ = {self.sigma:.1f} px)")]:
-            low, high = np.nanpercentile(image, [1.0, 99.5])
+        self.axes[0].imshow(colour_image(*colour, *colour_range), origin="lower", extent=extent)
+        for ax, image, reference, title in [
+                (self.axes[1], stacked, reference_snr[0], "S/N, all bands combined"),
+                (self.axes[2], filtered, reference_snr[1], f"S/N after PSF-matched filter (σ = {self.sigma:.1f} px)")]:
+            low, high = np.nanpercentile(reference, DISPLAY_PERCENTILES)
             ax.imshow(np.arcsinh(np.clip(image, low, high) / 3.0), origin="lower", extent=extent, cmap="gray")
             ax.set_title(title, fontsize=10)
         self.axes[0].set_title("g r i colour", fontsize=10)
