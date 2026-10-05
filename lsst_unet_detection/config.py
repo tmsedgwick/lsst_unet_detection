@@ -11,7 +11,7 @@ BANDS = ["u", "g", "r", "i", "z", "y"]
 CONFIG: dict[str, Any] = dict(
     # Tiling and network (must match how the model was trained; a model's config says how it was).
     tile_size=256, tile_halo=32, psf_stamp=25, base_filters=24,
-    heads=("galaxy_heatmap", "star_heatmap", "clump_map", "tidal_map", "spike_map", "detection_heatmap"),
+    heads=("galaxy_heatmap", "star_heatmap", "sfregion_map", "tidal_map", "spike_map", "detection_heatmap"),
     # Beyond the image edge a tile holds "no data" (zero signal, variance no_data_variance), as in training.
     edge_padding="no_data", no_data_variance=1e12,
     # Peak finding on the predicted detection heatmap.

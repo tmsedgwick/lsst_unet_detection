@@ -116,7 +116,7 @@ def test_models_of_the_original_layout_still_run(exposures, models_root):
 def test_maps_cover_the_image(exposures, models_root):
     detector = load_detector("tiny", models_root)
     maps = detection_maps(exposures, detector)
-    assert {"tidal_map", "clump_map", "spike_map", "detection_heatmap", "star_heatmap"} <= set(maps)
+    assert {"tidal_map", "sfregion_map", "spike_map", "detection_heatmap", "star_heatmap"} <= set(maps)
     assert all(image.shape == (SIZE, SIZE) and np.isfinite(image).all() and (image > 0).all()
                for image in maps.values())
 

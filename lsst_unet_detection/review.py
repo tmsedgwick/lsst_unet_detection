@@ -48,11 +48,11 @@ SCORE_COLUMN = "p_detection_centroid"
 # Keys that record a decision, with the reason they give (lsst_unet_training's update code reads these reasons; those
 # naming a phenomenon teach the model's map of it).
 DECISION_KEYS = {"r": ("real", ""), "s": ("spurious", ""), "u": ("unsure", ""), "t": ("real", "star"),
-                 "1": ("spurious", "spike"), "2": ("spurious", "bridge"), "3": ("spurious", "sf_region"),
+                 "1": ("spurious", "spike"), "2": ("spurious", "bridge"), "3": ("spurious", "sfregion"),
                  "4": ("spurious", "tidal"), "5": ("spurious", "bad_centroid"), "6": ("spurious", "hallucination")}
 REASONS = tuple(reason for _, reason in DECISION_KEYS.values() if reason)
 REASON_TEXT = dict(star="star", spike="diffraction spike", bridge="bridge between two sources",
-                   sf_region="star-forming region", tidal="tidal feature", bad_centroid="bad centroid",
+                   sfregion="star-forming region", tidal="tidal feature", bad_centroid="bad centroid",
                    hallucination="nothing there")
 
 

@@ -64,7 +64,7 @@ heatmaps, a mirror image beyond the edge) still run as they were trained.
 ## Maps
 
 Besides detections, the model maps where phenomena are: `tidal_map` (the probability that a pixel holds detectable
-light of a tidal stream or shell), `clump_map` (star-forming regions), `spike_map` (diffraction spikes), and the
+light of a tidal stream or shell), `sfregion_map` (star-forming regions), `spike_map` (diffraction spikes), and the
 centre heatmaps `galaxy_heatmap`, `star_heatmap` and `detection_heatmap`. `detection_maps(coadds, detector)` returns
 them as images on the coadd's pixel grid, and `detect_galaxies.py --save-maps maps.npz` saves them with the
 catalogue.
