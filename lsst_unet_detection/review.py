@@ -150,8 +150,7 @@ class ReviewSession:
             raise FileNotFoundError(f"{feedback_path} exists but {table_path.name} does not, so its candidates cannot "
                                     "be recovered; choose another --out")
         if table_path.exists():
-            # Reviews started before p_real was renamed p_detection_centroid hold the old column name.
-            detections = pd.read_parquet(table_path).rename(columns={"p_real": SCORE_COLUMN})
+            detections = pd.read_parquet(table_path)
         else:
             detections = make_detections()
             Path(feedback_path).parent.mkdir(parents=True, exist_ok=True)

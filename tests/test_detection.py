@@ -86,7 +86,7 @@ def test_model_lookup_by_name(models_root):
     assert load_detector("tiny", models_root).name == "tiny"
     assert load_detector(str(models_root / "tiny")).threshold == 0.5
     assert load_detector("tiny", models_root, threshold=0.9).threshold == 0.9
-    with pytest.raises(FileNotFoundError, match="available: \\['original', 'tiny'\\]"):
+    with pytest.raises(FileNotFoundError, match="available: \\['centres', 'tiny'\\]"):
         load_detector("missing", models_root)
 
 
@@ -106,8 +106,8 @@ def test_detect_galaxies_catalogue(exposures, models_root):
     assert {"p_detection_centroid", "galaxy_score", "star_score"} <= set(catalogue.columns)
 
 
-def test_models_of_the_original_layout_still_run(exposures, models_root):
-    detector = load_detector("original", models_root, threshold=0.0)
+def test_a_model_with_centre_heads_only(exposures, models_root):
+    detector = load_detector("centres", models_root, threshold=0.0)
     assert detector.detection_map == "galaxy_heatmap" and detector.cfg["edge_padding"] == "reflect"
     catalogue = detect_galaxies(exposures, detector)
     assert len(catalogue) > 0 and "star_score" not in catalogue

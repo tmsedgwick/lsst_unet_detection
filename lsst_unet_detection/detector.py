@@ -5,7 +5,7 @@ calibration is refitted from them), the threshold and the model config, which sa
 it fills the area beyond the image edge.
 
 The image is cut into tile_size tiles, each read with a tile_halo border of context; beyond the image edge the border
-holds "no data" (zero signal, a huge variance) or, for models made before that, a mirror image. Per band the network
+holds "no data" (zero signal, a huge variance) or, if the model config says so, a mirror image. Per band the network
 sees arcsinh(S/N / 3) and the normalised log variance, plus the PSF stamps. Detections are the 3x3 local maxima of
 the detection heatmap (or, for models without it, the galaxy heatmap) inside each tile, refined by the predicted
 sub-pixel offset, calibrated to p_detection_centroid (the probability that the peak is the centre of a real galaxy or
@@ -24,7 +24,7 @@ import pandas as pd
 from scipy.ndimage import maximum_filter
 from sklearn.isotonic import IsotonicRegression
 
-from .config import ARTEFACTS, BANDS, CONFIG, SETTINGS_OF_OLDER_MODELS
+from .config import ARTEFACTS, BANDS, CONFIG
 from .unet_model import build_unet
 
 SCORE_COLUMN = "p_detection_centroid"
@@ -179,8 +179,14 @@ def load_detector(model, models_root=None, threshold=None):
     p_detection_centroid cut."""
     model_dir = resolve_model_dir(model, models_root)
     config_path = model_dir / ARTEFACTS["model_config"]
-    model_config = json.loads(config_path.read_text()) if config_path.exists() else {}
-    cfg = {**CONFIG, **SETTINGS_OF_OLDER_MODELS, **model_config.get("cfg", {})}
+    if not config_path.exists():
+        raise FileNotFoundError(f"{model_dir} has no {ARTEFACTS['model_config']}: is it a model folder written by "
+                                "lsst_unet_training?")
+    model_config = json.loads(config_path.read_text())
+    missing = [key for key in ("heads", "edge_padding") if key not in model_config["cfg"]]
+    if missing:
+        raise ValueError(f"{config_path} does not give {', '.join(missing)}")
+    cfg = {**CONFIG, **model_config["cfg"]}
     cfg["heads"] = tuple(cfg["heads"])
     network = build_unet(cfg)
     network.load_weights(model_dir / ARTEFACTS["weights"])

@@ -46,8 +46,7 @@ config). Keep your models side by side in one folder and pick one by name:
 `load_detector("mep_unet", models_root="~/unet_models")` loads `~/unet_models/mep_unet`; you can also pass the
 folder path directly. A mistyped name lists the models that are available. Pass `threshold=` to override the
 calibrated `p_detection_centroid` cut, e.g. to trade purity for completeness. A model's config says which heads it
-has and how it fills the area beyond the image edge; models made before those settings (galaxy, clump and tidal
-heatmaps, a mirror image beyond the edge) still run as they were trained.
+has and how it fills the area beyond the image edge ("no data", or a mirror image with `edge_padding="reflect"`).
 
 ## Output catalogue
 

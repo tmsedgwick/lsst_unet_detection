@@ -12,7 +12,8 @@ CONFIG: dict[str, Any] = dict(
     # Tiling and network (must match how the model was trained; a model's config says how it was).
     tile_size=256, tile_halo=32, psf_stamp=25, base_filters=24,
     heads=("galaxy_heatmap", "star_heatmap", "sfregion_map", "tidal_map", "spike_map", "detection_heatmap"),
-    # Beyond the image edge a tile holds "no data" (zero signal, variance no_data_variance), as in training.
+    # Beyond the image edge a tile holds "no data" (zero signal, variance no_data_variance), as in training, or with
+    # edge_padding="reflect" a mirror image of the image.
     edge_padding="no_data", no_data_variance=1e12,
     # Peak finding on the predicted detection heatmap.
     min_peak_score=0.03,  # local maxima below this are noise-floor bumps
@@ -32,15 +33,11 @@ CONFIG: dict[str, Any] = dict(
     butler_repo="dp2", collections="dp2", skymap="lsst_cells_v2", dataset="deep_coadd",
 )
 
-# What a model config without these settings means: the model was saved before they existed, with the original heads
-# (centres of galaxies, clumps and tidal blobs) and a mirror image beyond the image edge.
-SETTINGS_OF_OLDER_MODELS = dict(heads=("galaxy_heatmap", "clump_heatmap", "tidal_heatmap"), edge_padding="reflect")
-
 # Files in a model folder, as written by lsst_unet_training.
 ARTEFACTS = dict(
     weights="mep_unet_detector.weights.h5",
     normalisation="mep_unet_normalisation.json",
-    model_config="mep_unet_model_config.json",  # optional
+    model_config="mep_unet_model_config.json",
     calib_peaks="mep_calib_peaks.parquet",
     threshold="mep_threshold.json",
 )
