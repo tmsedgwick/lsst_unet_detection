@@ -3,26 +3,26 @@
 The U-Net and the classical peak finder (peak_finder.py) are run on the same coadd and their detections matched
 within review_match_radius_pix. Three kinds of candidate can then be reviewed:
 
-  unet_only             U-Net detections (p_real >= threshold) with no peak-finder detection nearby
+  unet_only             U-Net detections (p_detection_centroid >= threshold) with no peak-finder detection nearby
   peakfinder_only       peak-finder detections with no U-Net detection nearby
-  unet_below_threshold  U-Net peaks just below the threshold (min_p_real <= p_real < threshold), whatever the peak
-                        finder found; reviewing these tells whether the threshold could be lowered
+  unet_below_threshold  U-Net peaks just below the threshold (min_score <= p_detection_centroid < threshold),
+                        whatever the peak finder found; reviewing these tells whether the threshold could be lowered
 
 Candidates are shown in a random order fixed by a seed, so the ones reviewed so far are always a random sample of
 the category, however many there are. The labels are saved to a feedback JSON file after every decision:
 
   {"category": ..., "n": number of candidates, "order": "random", "seed": ..., "coadd": ..., "model": ...,
    "threshold": ..., "origin": [x0, y0],
-   "reviewed": {candidate id: {"x", "y", "x_patch", "y_patch", "score", "decision", "how"}, ...},
+   "reviewed": {candidate id: {"x", "y", "x_patch", "y_patch", "score", "decision", "how", "reason"}, ...},
    "missed": [{"x", "y", "x_patch", "y_patch", "near_candidate"}, ...]}
 
 decision is "real" (a genuine source), "spurious" (an artefact or noise) or "unsure"; how is "random" if the candidate
 came up in the random order and "selected" if the reviewer clicked it, since only the random ones are an unbiased
-sample of the category. "missed" lists sources the reviewer spotted that no detection caught. x, y are pixels of
-the coadd array and x_patch, y_patch add its origin.
-Labels outside the browsing category are stored in additional_reviewed, keyed by row id in the full saved
-detections table, with category, finder and how="selected". They do not affect n, reviewed or the random order.
-Legacy training readers ignore additional_reviewed.
+sample of the category. reason, when given, says what the detection is: REASONS (a star, or why it is spurious).
+"missed" lists sources the reviewer spotted that no detection caught. x, y are pixels of the coadd array and
+x_patch, y_patch add its origin. Labels outside the browsing category are stored in additional_reviewed, keyed by
+row id in the full saved detections table, with category, finder and how="selected"; they do not affect n, reviewed
+or the random order.
 This is the label format lsst_unet_training's update_threshold_on_aux.py and update_weights_on_aux.py read.
 
 All detections are saved next to the JSON (<name>.candidates.parquet) when a review starts, so reopening it
@@ -44,6 +44,16 @@ from .pipeline import suppress_duplicates
 
 CATEGORIES = ("unet_only", "peakfinder_only", "unet_below_threshold")
 DECISIONS = ("real", "spurious", "unsure")
+SCORE_COLUMN = "p_detection_centroid"
+# Keys that record a decision, with the reason they give (lsst_unet_training's update code reads these reasons; those
+# naming a phenomenon teach the model's map of it).
+DECISION_KEYS = {"r": ("real", ""), "s": ("spurious", ""), "u": ("unsure", ""), "t": ("real", "star"),
+                 "1": ("spurious", "spike"), "2": ("spurious", "bridge"), "3": ("spurious", "sf_region"),
+                 "4": ("spurious", "tidal"), "5": ("spurious", "bad_centroid"), "6": ("spurious", "hallucination")}
+REASONS = tuple(reason for _, reason in DECISION_KEYS.values() if reason)
+REASON_TEXT = dict(star="star", spike="diffraction spike", bridge="bridge between two sources",
+                   sf_region="star-forming region", tidal="tidal feature", bad_centroid="bad centroid",
+                   hallucination="nothing there")
 
 
 def load_coadd(path, bands=BANDS):
@@ -68,17 +78,18 @@ def match(unet_xy, peak_xy, radius):
     return unet_matched, peak_matched
 
 
-def build_candidates(signal, variance, psf_kernels, detector, min_p_real=0.5, cfg=CONFIG):
+def build_candidates(signal, variance, psf_kernels, detector, min_score=0.5, cfg=CONFIG):
     """Every detection of both finders on the coadd, one row each: x, y, finder ("unet" / "peakfinder"), category
-    ("both", "unet_only", "peakfinder_only" or "unet_below_threshold"), p_real (U-Net) and peak_sn (peak finder).
+    ("both", "unet_only", "peakfinder_only" or "unet_below_threshold"), p_detection_centroid (U-Net) and peak_sn
+    (peak finder).
 
-    U-Net peaks are merged within duplicate_radius_pix, keeping the highest p_real, before they are split at the
-    threshold; below-threshold peaks with p_real < min_p_real are dropped.
+    U-Net peaks are merged within duplicate_radius_pix, keeping the highest p_detection_centroid, before they are
+    split at the threshold; below-threshold peaks with p_detection_centroid < min_score are dropped.
     """
     signal, variance = neutralise_bad_pixels(signal, variance, cfg["bad_pixel_variance_factor"])
     unet = suppress_duplicates(detector.scored_peaks(signal, variance, psf_kernels), cfg["duplicate_radius_pix"])
-    above = unet["p_real"].to_numpy(float) >= detector.threshold
-    below = unet[~above & (unet["p_real"].to_numpy(float) >= min_p_real)]
+    above = unet[SCORE_COLUMN].to_numpy(float) >= detector.threshold
+    below = unet[~above & (unet[SCORE_COLUMN].to_numpy(float) >= min_score)]
     unet = unet[above]
     peaks = find_peaks(signal, psf_kernels, threshold_sn=cfg["peak_threshold_sn"],
                        grow_sigmas=cfg["peak_grow_sigmas"], merge_radius_pix=cfg["peak_merge_radius_pix"],
@@ -87,14 +98,15 @@ def build_candidates(signal, variance, psf_kernels, detector, min_p_real=0.5, cf
                                        cfg["review_match_radius_pix"])
     tables = [
         pd.DataFrame(dict(x=unet["x"], y=unet["y"], finder="unet",
-                          category=np.where(unet_matched, "both", "unet_only"), p_real=unet["p_real"], peak_sn=np.nan)),
+                          category=np.where(unet_matched, "both", "unet_only"), **{SCORE_COLUMN: unet[SCORE_COLUMN]},
+                          peak_sn=np.nan)),
         pd.DataFrame(dict(x=peaks["x"], y=peaks["y"], finder="peakfinder",
-                          category=np.where(peak_matched, "both", "peakfinder_only"), p_real=np.nan,
+                          category=np.where(peak_matched, "both", "peakfinder_only"), **{SCORE_COLUMN: np.nan},
                           peak_sn=peaks["peak_sn"])),
         pd.DataFrame(dict(x=below["x"], y=below["y"], finder="unet", category="unet_below_threshold",
-                          p_real=below["p_real"], peak_sn=np.nan)),
+                          **{SCORE_COLUMN: below[SCORE_COLUMN]}, peak_sn=np.nan)),
     ]
-    return pd.concat(tables, ignore_index=True).astype(dict(x=float, y=float, p_real=float, peak_sn=float))
+    return pd.concat(tables, ignore_index=True).astype({"x": float, "y": float, SCORE_COLUMN: float, "peak_sn": float})
 
 
 def candidates_path(feedback_path):
@@ -138,7 +150,8 @@ class ReviewSession:
             raise FileNotFoundError(f"{feedback_path} exists but {table_path.name} does not, so its candidates cannot "
                                     "be recovered; choose another --out")
         if table_path.exists():
-            detections = pd.read_parquet(table_path)
+            # Reviews started before p_real was renamed p_detection_centroid hold the old column name.
+            detections = pd.read_parquet(table_path).rename(columns={"p_real": SCORE_COLUMN})
         else:
             detections = make_detections()
             Path(feedback_path).parent.mkdir(parents=True, exist_ok=True)
@@ -172,37 +185,43 @@ class ReviewSession:
                 return position
         return None
 
-    def decide(self, position, decision):
+    def decide(self, position, decision, reason=""):
         """Label the candidate at a position in the random order."""
-        self.label(self.candidate(position)[0], decision, how="random")
+        self.label(self.candidate(position)[0], decision, how="random", reason=reason)
 
-    def label(self, candidate_id, decision, how):
-        """Save a decision for a candidate. how records whether it came up in the random order ("random") or was
-        picked by clicking ("selected"); only the random ones form an unbiased sample of the category."""
+    def label(self, candidate_id, decision, how, reason=""):
+        """Save a decision (and optionally a REASONS reason) for a candidate. how records whether it came up in the
+        random order ("random") or was picked by clicking ("selected"); only the random ones form an unbiased sample
+        of the category."""
         if decision not in DECISIONS:
             raise ValueError(f"decision {decision!r}: choose from {DECISIONS}")
         self._save_label(self.candidates.iloc[int(candidate_id)], self.feedback["reviewed"],
-                         str(int(candidate_id)), decision, how)
+                         str(int(candidate_id)), decision, how, reason)
 
-    def label_detection(self, detection_id, decision):
+    def label_detection(self, detection_id, decision, reason=""):
         """Label any displayed detection without adding it to the browsing sample."""
         if decision not in DECISIONS:
             raise ValueError(f"decision {decision!r}: choose from {DECISIONS}")
         detection_id = int(detection_id)
         candidate_id = self.detection_to_candidate.get(detection_id)
         if candidate_id is not None:
-            self.label(candidate_id, decision, how="selected")
+            self.label(candidate_id, decision, how="selected", reason=reason)
         else:
             self._save_label(self.detections.iloc[detection_id], self.feedback["additional_reviewed"],
-                             str(detection_id), decision, "selected")
+                             str(detection_id), decision, "selected", reason)
 
-    def _save_label(self, row, labels, label_id, decision, how):
-        score = row["p_real"] if np.isfinite(row["p_real"]) else row["peak_sn"]
+    def _save_label(self, row, labels, label_id, decision, how, reason=""):
+        if reason and reason not in REASONS:
+            raise ValueError(f"reason {reason!r}: choose from {REASONS}")
+        score = row[SCORE_COLUMN] if np.isfinite(row[SCORE_COLUMN]) else row["peak_sn"]
         labels[label_id] = dict(
             x=float(row["x"]), y=float(row["y"]), x_patch=float(row["x"]) + self.origin[0],
             y_patch=float(row["y"]) + self.origin[1], score=float(score), decision=decision, how=how,
-            category=str(row["category"]), finder=str(row["finder"]))
+            category=str(row["category"]), finder=str(row["finder"]), **(dict(reason=reason) if reason else {}))
         self.save()
+
+    def reason(self, position):
+        return self.feedback["reviewed"].get(str(self.candidate(position)[0]), {}).get("reason", "")
 
     def add_missed(self, x, y, position):
         self.feedback["missed"].append(dict(x=float(x), y=float(y), x_patch=float(x) + self.origin[0],
@@ -237,8 +256,10 @@ def snr_images(signal, variance, sigma):
     return stacked, filtered
 
 
-HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   "
-        "click markers to select them, then r / s / u labels them   esc deselect\n"
+HELP = ("r real   t real star   u unsure   s spurious, or spurious because:  1 diffraction spike   "
+        "2 bridge between two sources   3 star-forming region   4 tidal feature   5 bad centroid   6 nothing there\n"
+        "→ / ← next / previous   f first unreviewed   "
+        "click markers to select them, then a decision key labels them   esc deselect\n"
         "+ / − zoom   0 reset zoom   m markers on/off   shift+click mark a missed source   x undo missed   q quit")
 MARKERS = dict(both=("o", "white"), unet_only=("o", "magenta"), peakfinder_only=("s", "orange"),
                unet_below_threshold=("D", "deepskyblue"))
@@ -262,9 +283,9 @@ class ReviewWindow:
         self.half_width, self.show_markers = self.START_HALF_WIDTH, True
         self.position = session.next_unreviewed() or 0
         self.message = ""  # a one-line notice shown under the title, e.g. about a key that does nothing
-        self.selected = []  # row ids in session.detections picked by clicking; r / s / u label these instead of the centre one
+        self.selected = []  # rows of session.detections picked by clicking; decision keys label these, not the centre
         self.figure, self.axes = plt.subplots(1, 3, figsize=(14, 5.4))
-        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.80, bottom=0.14, wspace=0.03)
+        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.80, bottom=0.17, wspace=0.03)
         self.figure.text(0.5, 0.008, HELP, ha="center", va="bottom", fontsize=8.5, color="0.3", linespacing=1.5)
         self.add_key()
         self.status = self.figure.text(0.5, 0.855, "", ha="center", fontsize=10, color="#d62728")
@@ -289,7 +310,7 @@ class ReviewWindow:
                    symbol("x", "yellow", "missed source you marked")]
         handles.append(Line2D([], [], ls="none", marker="none",
                               label="✓ / ✗ / ~  reviewed real / spurious / unsure"))
-        self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.06), ncol=len(handles),
+        self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.085), ncol=len(handles),
                            fontsize=8, frameon=False, handletextpad=0.3, columnspacing=1.2)
 
     def cutout(self, cube, cx, cy, half_width=None):
@@ -358,8 +379,11 @@ class ReviewWindow:
             ax.set_xticks([])
             ax.set_yticks([])
 
-        score = (f"p_real {row['p_real']:.3f}" if np.isfinite(row["p_real"]) else f"peak S/N {row['peak_sn']:.1f}")
+        score = (f"p_detection_centroid {row[SCORE_COLUMN]:.3f}" if np.isfinite(row[SCORE_COLUMN])
+                 else f"peak S/N {row['peak_sn']:.1f}")
         decision = session.decision(self.position) or "not reviewed"
+        if session.reason(self.position):
+            decision += f" ({REASON_TEXT[session.reason(self.position)]})"
         self.figure.suptitle(
             f"{session.feedback['category']}   ·   candidate {self.position + 1} of {len(session.order)} in random "
             f"order   ·   {score}   ·   {decision}\n{session.n_reviewed} reviewed, {len(session.feedback['missed'])} "
@@ -379,15 +403,16 @@ class ReviewWindow:
         # Arrow keys can arrive with modifiers attached on some systems (e.g. "fn+right" on a Mac): ignore those.
         key = next((arrow for arrow in ("left", "right") if raw_key.endswith(arrow)), raw_key)
         self.message = ""
-        if key in ("r", "s", "u") and self.selected:
-            decision = dict(r="real", s="spurious", u="unsure")[key]
+        if key in DECISION_KEYS and self.selected:
+            decision, reason = DECISION_KEYS[key]
             for candidate_id in self.selected:
-                self.session.label_detection(candidate_id, decision)
-            self.message = f"labelled {len(self.selected)} selected detection(s) {decision}"
+                self.session.label_detection(candidate_id, decision, reason)
+            self.message = (f"labelled {len(self.selected)} selected detection(s) {decision}"
+                            + (f" ({REASON_TEXT[reason]})" if reason else ""))
             self.selected = []
             self.draw()  # stay on the current candidate
-        elif key in ("r", "s", "u"):
-            self.session.decide(self.position, dict(r="real", s="spurious", u="unsure")[key])
+        elif key in DECISION_KEYS:
+            self.session.decide(self.position, *DECISION_KEYS[key])
             following = self.session.next_unreviewed(self.position + 1)
             self.go_to(self.position + 1 if following is None else following)
         elif key == "escape":

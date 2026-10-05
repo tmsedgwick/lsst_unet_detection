@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lsst_unet_detection import BANDS, detect_galaxies, extract_inputs, load_detector
+from lsst_unet_detection import BANDS, detect_galaxies, detection_maps, extract_inputs, load_detector
 from lsst_unet_detection.butler_input import neutralise_bad_pixels, psf_stamp
+from lsst_unet_detection.detector import extract_halo
 from lsst_unet_detection.pipeline import suppress_duplicates
 
 SIZE, CORNER = 300, (1000, 2000)  # image side and its tract-pixel corner
@@ -85,13 +86,13 @@ def test_model_lookup_by_name(models_root):
     assert load_detector("tiny", models_root).name == "tiny"
     assert load_detector(str(models_root / "tiny")).threshold == 0.5
     assert load_detector("tiny", models_root, threshold=0.9).threshold == 0.9
-    with pytest.raises(FileNotFoundError, match="available: \\['tiny'\\]"):
+    with pytest.raises(FileNotFoundError, match="available: \\['original', 'tiny'\\]"):
         load_detector("missing", models_root)
 
 
 def test_suppress_duplicates_keeps_best():
-    detections = pd.DataFrame(dict(x=[10.0, 11.0, 50.0], y=[10.0, 10.5, 50.0], p_real=[0.6, 0.9, 0.7]))
-    assert suppress_duplicates(detections, 3.0)["p_real"].tolist() == [0.9, 0.7]
+    detections = pd.DataFrame(dict(x=[10.0, 11.0, 50.0], y=[10.0, 10.5, 50.0], p_detection_centroid=[0.6, 0.9, 0.7]))
+    assert suppress_duplicates(detections, 3.0)["p_detection_centroid"].tolist() == [0.9, 0.7]
 
 
 def test_detect_galaxies_catalogue(exposures, models_root):
@@ -102,3 +103,24 @@ def test_detect_galaxies_catalogue(exposures, models_root):
     assert np.allclose(catalogue["x_tract"] - catalogue["x"], CORNER[0])
     assert np.allclose(catalogue["dec"], 2.0 + catalogue["y_tract"] * 0.2 / 3600)
     assert bool(catalogue["predicted_re_pix"].notna().all())
+    assert {"p_detection_centroid", "galaxy_score", "star_score"} <= set(catalogue.columns)
+
+
+def test_models_of_the_original_layout_still_run(exposures, models_root):
+    detector = load_detector("original", models_root, threshold=0.0)
+    assert detector.detection_map == "galaxy_heatmap" and detector.cfg["edge_padding"] == "reflect"
+    catalogue = detect_galaxies(exposures, detector)
+    assert len(catalogue) > 0 and "star_score" not in catalogue
+
+
+def test_maps_cover_the_image(exposures, models_root):
+    detector = load_detector("tiny", models_root)
+    maps = detection_maps(exposures, detector)
+    assert {"tidal_map", "clump_map", "spike_map", "detection_heatmap", "star_heatmap"} <= set(maps)
+    assert all(image.shape == (SIZE, SIZE) and np.isfinite(image).all() and (image > 0).all()
+               for image in maps.values())
+
+
+def test_no_data_beyond_the_edge():
+    patch = extract_halo(np.ones((6, 300, 300), np.float32), 0, 0, 256, 32, fill=7.0)
+    assert (patch[:, :32, :] == 7.0).all() and (patch[:, 32:300, 32:300] == 1.0).all()

@@ -5,15 +5,19 @@ failures. Runs on a coadd saved as .npz (e.g. by detect_galaxies.py --save-coadd
     python scripts/review_detections.py --coadd coadd.npz --model mep_unet --models-root ~/unet_models --unet-only --out feedback_unet_only.json
     # peak-finder detections the U-Net did not make
     python scripts/review_detections.py --coadd coadd.npz --model mep_unet --models-root ~/unet_models --peakfinder-only --out feedback_peakfinder_only.json
-    # U-Net peaks just below its threshold (p_real between --min-p-real and the threshold)
+    # U-Net peaks just below its threshold (p_detection_centroid between --min-score and the threshold)
     python scripts/review_detections.py --coadd coadd.npz --model mep_unet --models-root ~/unet_models --below-threshold --out feedback_unet_below_threshold.json
 
 Every decision is saved straight away. Run the same command again to continue where you stopped: the candidates and
 their order are read back from <out>.candidates.parquet, so the model is not run again. Keys:
 
-    r real   s spurious   u unsure   right / left arrow: next / previous   f: first unreviewed
+    r real   t real star   u unsure   s spurious, or spurious because: 1 diffraction spike, 2 bridge between two
+    sources, 3 star-forming region, 4 tidal feature, 5 bad centroid, 6 nothing there
+    right / left arrow: next / previous   f: first unreviewed
     + / -: zoom   0: reset zoom   m: markers on / off   shift+click: mark a missed source   x: undo missed   q: quit
-    click markers: select them; r / s / u then label the selection and stay put   esc: deselect
+    click markers: select them; a decision key then labels the selection and stays put   esc: deselect
+
+The reasons are saved with the labels; lsst_unet_training's update uses them (e.g. 4 teaches its tidal map).
 """
 
 import argparse
@@ -37,9 +41,10 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="feedback JSON file to write (or continue)")
     parser.add_argument("--model", help="model folder, or its name inside --models-root (needed to start a review)")
     parser.add_argument("--models-root", type=Path, help="folder holding one sub-folder per trained model")
-    parser.add_argument("--threshold", type=float, help="override the model's calibrated p_real threshold")
-    parser.add_argument("--min-p-real", type=float, default=0.5,
-                        help="lowest p_real shown by --below-threshold (default: %(default)s)")
+    parser.add_argument("--threshold", type=float,
+                        help="override the model's calibrated p_detection_centroid threshold")
+    parser.add_argument("--min-score", type=float, default=0.5,
+                        help="lowest p_detection_centroid shown by --below-threshold (default: %(default)s)")
     parser.add_argument("--peak-sn", type=float, default=CONFIG["peak_threshold_sn"],
                         help="S/N threshold of the classical peak finder (default: %(default)s)")
     parser.add_argument("--seed", type=int, default=0, help="seed of the random order (default: %(default)s)")
@@ -52,10 +57,10 @@ def main():
         if args.model is None:
             parser.error("--model is needed to start a new review")
         detector = load_detector(args.model, args.models_root, args.threshold)
-        details.update(model=detector.name, threshold=detector.threshold, min_p_real=args.min_p_real,
+        details.update(model=detector.name, threshold=detector.threshold, min_score=args.min_score,
                        peak_threshold_sn=args.peak_sn)
         print(f"Running the U-Net ({detector.name}) and the peak finder on {args.coadd.name}...")
-        detections = build_candidates(signal, variance, psf_kernels, detector, args.min_p_real,
+        detections = build_candidates(signal, variance, psf_kernels, detector, args.min_score,
                                       {**CONFIG, "peak_threshold_sn": args.peak_sn})
         print(detections["category"].value_counts().to_string())
         return detections

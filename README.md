@@ -11,7 +11,7 @@ from lsst_unet_detection import detect_galaxies, load_deep_coadds, load_detector
 butler = Butler("dp2", collections="dp2")
 coadds = load_deep_coadds(butler, tract=2877, patch=34)            # {band: deep_coadd exposure}, ugrizy
 detector = load_detector("mep_unet", models_root="~/unet_models")  # choose the model by name
-detections = detect_galaxies(coadds, detector)                     # DataFrame: x, y, ra, dec, p_real, ...
+detections = detect_galaxies(coadds, detector)                     # DataFrame: x, y, ra, dec, p_detection_centroid, ...
 ```
 
 ## What it does
@@ -24,11 +24,12 @@ detections = detect_galaxies(coadds, detector)                     # DataFrame: 
    as in training.
 3. **Neutralise bad pixels.** Pixels with NaN or non-positive variance (NO_DATA, gaps) get zero signal and a huge
    variance, so they read as pure noise.
-4. **Run the U-Net.** The image is processed in 256 × 256 tiles with 32 pixels of context. Detections are the peaks
-   of the predicted galaxy-centre heatmap, refined by the predicted sub-pixel offset. Raw scores are calibrated to
-   `p_real`, the probability a detection is real, and those below the model's threshold (set for 99% purity on the
-   mocks) are dropped.
-5. **Remove duplicates** within 3 pixels, keeping the highest `p_real`.
+4. **Run the U-Net.** The image is processed in 256 × 256 tiles with 32 pixels of context; beyond the image edge the
+   context is "no data" (zero signal, a huge variance), as in training. Detections are the peaks of the predicted
+   detection heatmap (the centres of galaxies and stars), refined by the predicted sub-pixel offset. Raw scores are
+   calibrated to `p_detection_centroid`, the probability that a detection is the centre of a real source, and those
+   below the model's threshold (set for 99% purity on the mocks) are dropped.
+5. **Remove duplicates** within 3 pixels, keeping the highest `p_detection_centroid`.
 6. **Add coordinates**: tract pixel positions and RA/Dec from the coadd WCS.
 
 ## Choosing a model
@@ -44,7 +45,9 @@ config). Keep your models side by side in one folder and pick one by name:
 
 `load_detector("mep_unet", models_root="~/unet_models")` loads `~/unet_models/mep_unet`; you can also pass the
 folder path directly. A mistyped name lists the models that are available. Pass `threshold=` to override the
-calibrated `p_real` cut, e.g. to trade purity for completeness.
+calibrated `p_detection_centroid` cut, e.g. to trade purity for completeness. A model's config says which heads it
+has and how it fills the area beyond the image edge; models made before those settings (galaxy, clump and tidal
+heatmaps, a mirror image beyond the edge) still run as they were trained.
 
 ## Output catalogue
 
@@ -53,9 +56,18 @@ calibrated `p_real` cut, e.g. to trade purity for completeness.
 | `x`, `y` | position in the loaded image's pixels (0-based) |
 | `x_tract`, `y_tract` | position in tract pixel coordinates |
 | `ra`, `dec` | sky position (degrees) |
-| `raw_score` | peak height of the predicted galaxy heatmap |
-| `p_real` | calibrated probability that the detection is a real galaxy |
+| `raw_score` | peak height of the predicted detection heatmap |
+| `p_detection_centroid` | calibrated probability that the detection is the centre of a real galaxy or star |
 | `predicted_re_pix` | predicted half-light radius in pixels (models with a model config) |
+| `galaxy_score`, `star_score` | the galaxy and star heatmaps at the detection: what kind of source it is (models with those heads) |
+
+## Maps
+
+Besides detections, the model maps where phenomena are: `tidal_map` (the probability that a pixel holds detectable
+light of a tidal stream or shell), `clump_map` (star-forming regions), `spike_map` (diffraction spikes), and the
+centre heatmaps `galaxy_heatmap`, `star_heatmap` and `detection_heatmap`. `detection_maps(coadds, detector)` returns
+them as images on the coadd's pixel grid, and `detect_galaxies.py --save-maps maps.npz` saves them with the
+catalogue.
 | `tract`, `patch`, `model` | added by the command-line script |
 
 ## Install
@@ -87,13 +99,16 @@ The script needs the LSST stack and Butler access. Defaults are for Data Preview
 # A whole patch
 python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --tract 2877 --patch 34 --out ~/detections/tract2877_patch34.parquet
 
+# The same, also saving the model's maps (tidal features, star-forming regions, spikes, ...)
+python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --tract 2877 --patch 34 --out ~/detections/tract2877_patch34.parquet --save-maps ~/detections/tract2877_patch34_maps.npz
+
 # A 3072 px (10.2') square centred on a position
 python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --ra 59.5 --dec -0.75 --size 3072 --out ~/detections/cirrus.parquet
 
 # The same patch with a different model, to compare
 python scripts/detect_galaxies.py --model mep_unet_longer_training --models-root ~/unet_models --tract 2877 --patch 34 --out ~/detections/tract2877_patch34_longer.parquet
 
-# A model folder given directly, and a looser p_real cut (more complete, less pure)
+# A model folder given directly, and a looser p_detection_centroid cut (more complete, less pure)
 python scripts/detect_galaxies.py --model ~/unet_models/mep_unet --tract 2877 --patch 34 --threshold 0.7 --out ~/detections/loose.csv
 
 # Another Butler repository / collection / skymap
@@ -115,7 +130,8 @@ detections = detect_galaxies(my_coadds, detector)
 
 # or plain arrays: signal and variance (6, H, W) in nJy, psf_kernels (25, 25, 6) unit-sum stamps
 signal, variance = neutralise_bad_pixels(signal, variance)
-detections = detector.detect(signal, variance, psf_kernels)  # x, y, raw_score, p_real, predicted_re_pix
+detections = detector.detect(signal, variance, psf_kernels)  # x, y, raw_score, p_detection_centroid, ...
+maps = detector.maps(signal, variance, psf_kernels)  # {"tidal_map": image, "spike_map": image, ...}
 ```
 
 ## Tests
@@ -136,7 +152,7 @@ reviewed so far is a random sample:
 
 - `--unet-only`: U-Net detections the peak finder did not make
 - `--peakfinder-only`: peak-finder detections the U-Net did not make
-- `--below-threshold`: U-Net peaks with p_real between `--min-p-real` (default 0.5) and the threshold, to judge
+- `--below-threshold`: U-Net peaks with p_detection_centroid between `--min-score` (default 0.5) and the threshold, to judge
   whether the threshold could be lowered
 
 The peak finder (`peak_finder.py`) approximates LSST source detection: per band, a PSF-matched smoothing, an S/N >= 5
@@ -146,12 +162,18 @@ background subtraction), then peaks from all bands within 5 pixels merged.
 The window shows a g r i colour cutout, the combined S/N and the PSF-matched S/N, with a key to the markers below
 them: the cyan + is the candidate being reviewed, and the other detections are marked
 (magenta ○ U-Net only, orange □ peak finder only, white ○ both, blue ◇ below threshold; ✓ / ✗ / ~ once reviewed).
-Keys: `r` real, `s` spurious, `u` unsure, `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0`
-reset zoom, `m` markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits.
+Keys: `r` real, `t` real and a star, `u` unsure, `s` spurious, or spurious with the reason: `1` diffraction spike,
+`2` bridge between two sources (should have been two detections), `3` star-forming region, `4` tidal feature, `5` bad
+centroid, `6` nothing there. `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0` reset zoom, `m`
+markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits. Reasons are saved
+with the labels; when lsst_unet_training fine-tunes on them, those naming a phenomenon teach its map (`4` teaches the
+tidal map, `t` the star heatmap).
+
 To label detections other than the one under the cyan +, e.g. a row of artefacts along a diffraction spike, click
-their markers, regardless of the browsing filter (including below-threshold and matched detections): each gets a yellow ring, and `r` / `s` / `u` then label all the selected ones and stay on the current
-candidate (`esc` deselects). Only labelling the centre candidate moves the review on. Labels record how they were made
-(`"how": "random"` or `"selected"`), since only the random ones are an unbiased sample.
+their markers, whatever their category (including below-threshold and matched detections): each gets a yellow ring,
+and a decision key then labels all the selected ones and stays on the current candidate (`esc` deselects). Only
+labelling the centre candidate moves the review on. Labels record how they were made (`"how": "random"` or
+`"selected"`), since only the random ones are an unbiased sample.
 
 Every decision is saved to the `--out` JSON, which is the label format lsst_unet_training's
 `update_threshold_on_aux.py` and `update_weights_on_aux.py` read. All detections are saved beside it

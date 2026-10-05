@@ -66,7 +66,8 @@ def detections_table(n=30):
     rng = np.random.default_rng(0)
     categories = ["unet_only"] * n + ["peakfinder_only"] * 5 + ["both"] * 5
     return pd.DataFrame(dict(x=rng.uniform(10, 190, len(categories)), y=rng.uniform(10, 190, len(categories)),
-                             finder="unet", category=categories, p_real=rng.uniform(0.9, 1, len(categories)),
+                             finder="unet", category=categories,
+                             p_detection_centroid=rng.uniform(0.9, 1, len(categories)),
                              peak_sn=np.nan))
 
 
@@ -132,6 +133,11 @@ def test_window_keys(coadd, tmp_path):
     other = session.detections[session.detections["category"] != "unet_only"].iloc[0]
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=other["x"], ydata=other["y"], key=None))
     assert window.selected == [int(other.name)] and "1 selected" in window.status.get_text()
+    window.on_key(SimpleNamespace(key="escape"))
+    window.on_key(SimpleNamespace(key="4"))  # spurious, a tidal feature: labels the centre and moves on
+    assert session.feedback["reviewed"][str(session.order[here])]["reason"] == "tidal"
+    assert session.feedback["reviewed"][str(session.order[here])]["decision"] == "spurious"
+    window.on_key(SimpleNamespace(key="left"))
     window.on_key(SimpleNamespace(key="fn+right"))  # as a Mac may send it
     assert window.position == here + 1
     window.on_key(SimpleNamespace(key="x"))
@@ -147,11 +153,11 @@ def test_window_keys(coadd, tmp_path):
 def test_build_candidates(coadd, models_root):
     signal, variance, kernels, _ = load_coadd(coadd)
     detector = load_detector("tiny", models_root, threshold=0.0)  # untrained: every peak passes
-    table = build_candidates(signal, variance, kernels, detector, min_p_real=0.0)
+    table = build_candidates(signal, variance, kernels, detector, min_score=0.0)
     assert set(table["category"]) <= {"both", "unet_only", "peakfinder_only", "unet_below_threshold"}
     peak_rows = table[table["finder"] == "peakfinder"]
     assert is_source(peak_rows).sum() == len(SOURCES) and peak_rows["peak_sn"].ge(5).all()
-    assert table.loc[table["finder"] == "unet", "p_real"].notna().all()
+    assert table.loc[table["finder"] == "unet", "p_detection_centroid"].notna().all()
 
 
 @pytest.mark.parametrize("category", ["unet_only", "peakfinder_only", "unet_below_threshold"])
@@ -163,7 +169,7 @@ def test_select_across_categories(coadd, tmp_path, category, key, decision):
     categories = ["unet_only", "peakfinder_only", "unet_below_threshold", "both"] * 2
     table = pd.DataFrame(dict(x=np.arange(8) * 5.0 + 70, y=100.0, category=categories,
                              finder=["unet", "peakfinder", "unet", "unet"] * 2,
-                             p_real=[0.95, np.nan, 0.6, 0.99] * 2,
+                             p_detection_centroid=[0.95, np.nan, 0.6, 0.99] * 2,
                              peak_sn=[np.nan, 8.0, np.nan, np.nan] * 2))
     out = tmp_path / "mixed.json"
     session = ReviewSession.start_or_resume(out, category, lambda: table, details=dict(origin=[10, 20]))
@@ -192,7 +198,8 @@ def test_select_across_categories(coadd, tmp_path, category, key, decision):
     assert len(session.feedback["additional_reviewed"]) == 6
     assert session.next_unreviewed(start + 1) is None  # selected candidate of the browsing category is skipped
     for i in targets:
-        labels = session.feedback["reviewed"] if i in session.detection_to_candidate else session.feedback["additional_reviewed"]
+        in_sample = i in session.detection_to_candidate
+        labels = session.feedback["reviewed"] if in_sample else session.feedback["additional_reviewed"]
         entry = labels[str(session.detection_to_candidate.get(i, i))]
         assert entry["category"] == table.iloc[i].category
         assert entry["decision"] == decision and entry["how"] == "selected"
