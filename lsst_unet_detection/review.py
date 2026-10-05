@@ -207,7 +207,7 @@ def snr_images(signal, variance, sigma):
     return stacked, filtered
 
 
-HELP = ("r real   s spurious   u unsure   → / ← next / previous   f first unreviewed   click a marker: review it   "
+HELP = ("r real   s spurious   u unsure   n / p next / previous   f first unreviewed   click a marker: review it   "
         "b back   "
         "+ / − zoom   0 reset zoom   m markers on/off   shift+click mark a missed source   x undo missed   q quit")
 MARKERS = dict(both=("o", "white"), unet_only=("o", "magenta"), peakfinder_only=("s", "orange"),
@@ -340,9 +340,9 @@ class ReviewWindow:
             self.session.decide(self.position, dict(r="real", s="spurious", u="unsure")[key])
             following = self.session.next_unreviewed(self.position + 1)
             self.go_to(self.position + 1 if following is None else following)
-        elif key == "right":
+        elif key in ("n", "right"):
             self.go_to(self.position + 1)
-        elif key == "left":
+        elif key in ("p", "left"):
             self.go_to(self.position - 1)
         elif key == "b" and self.return_position is not None:
             self.go_to(self.return_position)

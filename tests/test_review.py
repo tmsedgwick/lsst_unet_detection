@@ -109,7 +109,7 @@ def test_window_keys(coadd, tmp_path):
     start = window.position
     window.on_key(SimpleNamespace(key="s"))
     assert session.decision(start) == "spurious" and window.position == start + 1
-    window.on_key(SimpleNamespace(key="left"))
+    window.on_key(SimpleNamespace(key="p"))
     assert window.position == start
     centre_colour = lambda: window.axes[0].images[0].get_array()[window.half_width, window.half_width].copy()
     before = centre_colour()

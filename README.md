@@ -146,7 +146,7 @@ background subtraction), then peaks from all bands within 5 pixels merged.
 The window shows a g r i colour cutout, the combined S/N and the PSF-matched S/N, with a key to the markers below
 them: the cyan + is the candidate being reviewed, and the other detections are marked
 (magenta ○ U-Net only, orange □ peak finder only, white ○ both, blue ◇ below threshold; ✓ / ✗ / ~ once reviewed).
-Keys: `r` real, `s` spurious, `u` unsure, `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0`
+Keys: `r` real, `s` spurious, `u` unsure, `n` / `p` next / previous (or the arrow keys), `f` first unreviewed, `+` / `-` zoom, `0`
 reset zoom, `m` markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits.
 Click the marker of another candidate of the same kind to review it straight away; `b` goes back to where you were.
 
