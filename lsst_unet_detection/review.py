@@ -229,11 +229,32 @@ class ReviewWindow:
         self.half_width, self.show_markers = self.START_HALF_WIDTH, True
         self.position = session.next_unreviewed() or 0
         self.figure, self.axes = plt.subplots(1, 3, figsize=(14, 5.4))
-        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.08, wspace=0.03)
+        self.figure.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.12, wspace=0.03)
         self.figure.text(0.5, 0.02, HELP, ha="center", fontsize=8.5, color="0.3")
+        self.add_key()
         self.figure.canvas.mpl_connect("key_press_event", self.on_key)
         self.figure.canvas.mpl_connect("button_press_event", self.on_click)
         self.draw()
+
+    def add_key(self):
+        """A key to the markers, under the panels."""
+        from matplotlib.lines import Line2D
+
+        def symbol(marker, colour, label):
+            return Line2D([], [], ls="none", marker=marker, ms=9, mew=1.8, color=colour,
+                          markerfacecolor="none", label=label)
+
+        handles = [symbol("+", "cyan", "candidate being reviewed"),
+                   symbol(MARKERS["unet_only"][0], MARKERS["unet_only"][1], "U-Net only"),
+                   symbol(MARKERS["peakfinder_only"][0], MARKERS["peakfinder_only"][1], "peak finder only"),
+                   symbol(MARKERS["both"][0], "0.5", "both (U-Net and peak finder)"),
+                   symbol(MARKERS["unet_below_threshold"][0], MARKERS["unet_below_threshold"][1],
+                          "U-Net below threshold"),
+                   symbol("x", "yellow", "missed source you marked")]
+        handles.append(Line2D([], [], ls="none", marker="none",
+                              label="✓ / ✗ / ~  reviewed real / spurious / unsure"))
+        self.figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.045), ncol=len(handles),
+                           fontsize=8, frameon=False, handletextpad=0.3, columnspacing=1.2)
 
     def cutout(self, cube, cx, cy):
         h = self.half_width
