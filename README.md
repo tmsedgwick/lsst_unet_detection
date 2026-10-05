@@ -149,14 +149,16 @@ them: the cyan + is the candidate being reviewed, and the other detections are m
 Keys: `r` real, `s` spurious, `u` unsure, `→` / `←` next / previous, `f` first unreviewed, `+` / `-` zoom, `0`
 reset zoom, `m` markers on / off, shift+click marks a source no detection caught, `x` undoes the last one, `q` quits.
 To label detections other than the one under the cyan +, e.g. a row of artefacts along a diffraction spike, click
-their markers: each gets a yellow ring, and `r` / `s` / `u` then label all the selected ones and stay on the current
+their markers, regardless of the browsing filter (including below-threshold and matched detections): each gets a yellow ring, and `r` / `s` / `u` then label all the selected ones and stay on the current
 candidate (`esc` deselects). Only labelling the centre candidate moves the review on. Labels record how they were made
 (`"how": "random"` or `"selected"`), since only the random ones are an unbiased sample.
 
 Every decision is saved to the `--out` JSON, which is the label format lsst_unet_training's
 `update_threshold_on_aux.py` and `update_weights_on_aux.py` read. All detections are saved beside it
 (`<out>.candidates.parquet`), so running the same command again continues where you stopped, with the same
-candidates in the same order.
+candidates in the same order. Labels outside the browsing category are saved in `additional_reviewed`, with their
+actual `category`, `finder` and `how: "selected"`. They reappear when resuming and do not change the random sample
+or its progress count. Existing training update readers ignore this additional collection.
 
 ```bash
 # Save the coadd while detecting (needs the LSST stack); the review itself does not need the stack

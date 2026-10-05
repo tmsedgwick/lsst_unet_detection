@@ -131,7 +131,7 @@ def test_window_keys(coadd, tmp_path):
     assert saved["decision"] == "spurious" and saved["how"] == "selected"
     other = session.detections[session.detections["category"] != "unet_only"].iloc[0]
     window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=other["x"], ydata=other["y"], key=None))
-    assert window.selected == [] and "this window labels only unet only" in window.status.get_text()
+    assert window.selected == [int(other.name)] and "1 selected" in window.status.get_text()
     window.on_key(SimpleNamespace(key="fn+right"))  # as a Mac may send it
     assert window.position == here + 1
     window.on_key(SimpleNamespace(key="x"))
@@ -152,3 +152,56 @@ def test_build_candidates(coadd, models_root):
     peak_rows = table[table["finder"] == "peakfinder"]
     assert is_source(peak_rows).sum() == len(SOURCES) and peak_rows["peak_sn"].ge(5).all()
     assert table.loc[table["finder"] == "unet", "p_real"].notna().all()
+
+
+@pytest.mark.parametrize("category", ["unet_only", "peakfinder_only", "unet_below_threshold"])
+@pytest.mark.parametrize("key,decision", [("r", "real"), ("s", "spurious"), ("u", "unsure")])
+def test_select_across_categories(coadd, tmp_path, category, key, decision):
+    import matplotlib.pyplot as plt
+
+    signal, variance, kernels, _ = load_coadd(coadd)
+    categories = ["unet_only", "peakfinder_only", "unet_below_threshold", "both"] * 2
+    table = pd.DataFrame(dict(x=np.arange(8) * 5.0 + 70, y=100.0, category=categories,
+                             finder=["unet", "peakfinder", "unet", "unet"] * 2,
+                             p_real=[0.95, np.nan, 0.6, 0.99] * 2,
+                             peak_sn=[np.nan, 8.0, np.nan, np.nan] * 2))
+    out = tmp_path / "mixed.json"
+    session = ReviewSession.start_or_resume(out, category, lambda: table, details=dict(origin=[10, 20]))
+    window = ReviewWindow(session, signal, variance, kernels)
+    start = window.position
+    centre = int(session.candidate_detection_ids[session.order[start]])
+    targets = [i for i in range(len(table)) if i != centre]
+
+    def click(i):
+        row = table.iloc[i]
+        window.on_click(SimpleNamespace(inaxes=window.axes[0], xdata=row.x, ydata=row.y, key=None))
+
+    click(targets[0])
+    click(targets[0])
+    assert window.selected == []
+    click(targets[0])
+    window.on_key(SimpleNamespace(key="escape"))
+    assert window.selected == []
+    for i in targets:
+        click(i)
+    assert window.selected == targets
+    window.on_key(SimpleNamespace(key=key))
+    assert window.position == start and not window.selected
+    assert session.decision(start) is None
+    assert session.n_reviewed == 1
+    assert len(session.feedback["additional_reviewed"]) == 6
+    assert session.next_unreviewed(start + 1) is None  # selected candidate of the browsing category is skipped
+    for i in targets:
+        labels = session.feedback["reviewed"] if i in session.detection_to_candidate else session.feedback["additional_reviewed"]
+        entry = labels[str(session.detection_to_candidate.get(i, i))]
+        assert entry["category"] == table.iloc[i].category
+        assert entry["decision"] == decision and entry["how"] == "selected"
+        assert entry["x_patch"] == table.iloc[i].x + 10
+    assert sum(t.get_text() in ("✓", "✗", "~") for t in window.axes[0].texts) > 0
+    resumed = ReviewSession.start_or_resume(out, category, lambda: pytest.fail("must reuse saved table"))
+    assert resumed.feedback == session.feedback
+    assert resumed.order.tolist() == session.order.tolist()
+    click(targets[0])
+    window.on_key(SimpleNamespace(key="u"))
+    assert len(session.feedback["additional_reviewed"]) == 6
+    plt.close(window.figure)
