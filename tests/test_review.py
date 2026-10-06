@@ -11,9 +11,9 @@ import pytest
 
 matplotlib.use("Agg")
 
-from lsst_unet_detection import BANDS, find_peaks, load_detector  # noqa: E402
+from lsst_unet_detection import BANDS, find_peaks, load_coadd, load_detector  # noqa: E402
 from lsst_unet_detection.review import (ReviewSession, ReviewWindow, build_candidates, candidates_path,  # noqa: E402
-                                        load_coadd, match)
+                                        match)
 
 SIZE = 200
 SOURCES = np.array([[40.0, 50.0], [120.0, 60.0], [70.0, 150.0], [160.0, 160.0]])
