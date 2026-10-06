@@ -6,6 +6,8 @@ normalised to unit sum, which is how the network saw PSFs in training.
 
 Only load_deep_coadds and cutout_bbox import the LSST stack; the extraction works on any object with the afw
 Exposure interface (image, variance, getPsf, getBBox), e.g. an ExposureF or one band of a MultibandExposure.
+save_coadd writes the inputs to an .npz and load_coadd reads them back, so a saved coadd can be used without the
+stack.
 """
 
 import numpy as np
@@ -96,6 +98,24 @@ def save_coadd(path, exposures, bands=BANDS, stamp_size=CONFIG["psf_stamp"]):
     corner = next(exposures[band] for band in bands if band in exposures).getBBox()
     np.savez(path, signal=signal, variance=variance, psf_kernels=psf_kernels, bands=np.array(bands),
              origin=np.array([corner.getMinX(), corner.getMinY()]))
+
+
+def load_coadd(path, bands=BANDS):
+    """(signal, variance, psf_kernels, origin) from an .npz with signal and variance (band, y, x), psf_kernels
+    (stamp, stamp, band), bands and optionally origin (the tract pixel of the array's corner, as save_coadd writes
+    it). Bands the file does not hold get "no data" and the mean of the other bands' PSF stamps."""
+    data = np.load(path)
+    stored = [str(band) for band in data["bands"]]
+    signal, variance = np.asarray(data["signal"], np.float32), np.asarray(data["variance"], np.float32)
+    kernels = np.asarray(data["psf_kernels"], np.float32)
+    mean_stamp = kernels.mean(axis=-1)
+    origin = [int(v) for v in data["origin"]] if "origin" in data.files else [0, 0]
+    plane = lambda cube, band, fill: cube[stored.index(band)] if band in stored else np.full(cube.shape[1:], fill,
+                                                                                               np.float32)
+    return (np.stack([plane(signal, band, 0.0) for band in bands]),
+            np.stack([plane(variance, band, CONFIG["no_data_variance"]) for band in bands]),
+            np.stack([kernels[..., stored.index(band)] if band in stored else mean_stamp / mean_stamp.sum()
+                      for band in bands], axis=-1), origin)
 
 
 def neutralise_bad_pixels(signal, variance, no_data_variance=CONFIG["no_data_variance"]):

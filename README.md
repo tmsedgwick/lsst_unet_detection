@@ -103,8 +103,9 @@ pip install -r requirements.txt
 
 ## Example commands
 
-The script needs the LSST stack and Butler access. Defaults are for Data Preview 2 (`--repo dp2 --collections dp2
---skymap lsst_cells_v2`).
+Reading from the Butler needs the LSST stack and Butler access. Defaults are for Data Preview 2 (`--repo dp2
+--collections dp2 --skymap lsst_cells_v2`). A coadd saved as `.npz` (`--save-coadd`) can be read anywhere with
+`--coadd`; its catalogue has no `ra`, `dec`, since the file has no WCS.
 
 ```bash
 # A whole patch
@@ -115,6 +116,9 @@ python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models -
 
 # A 3072 px (10.2') square centred on a position
 python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --ra 59.5 --dec -0.75 --size 3072 --out ~/detections/cirrus.parquet
+
+# A coadd saved as .npz, with its maps (no LSST stack needed)
+python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --coadd ~/coadds/tract2877_patch34.npz --out ~/detections/tract2877_patch34.parquet --save-maps ~/detections/tract2877_patch34_maps.npz
 
 # The same patch with a different model, to compare
 python scripts/detect_galaxies.py --model mep_unet_longer_training --models-root ~/unet_models --tract 2877 --patch 34 --out ~/detections/tract2877_patch34_longer.parquet
@@ -210,10 +214,10 @@ python scripts/review_detections.py --coadd ~/coadds/tract2877_patch34.npz --mod
 | Path | Contents |
 |---|---|
 | `lsst_unet_detection/config.py` | settings (`CONFIG`) and model file names |
-| `lsst_unet_detection/butler_input.py` | fetching `deep_coadd`s, extracting image / variance / PSF, bad pixels |
+| `lsst_unet_detection/butler_input.py` | fetching `deep_coadd`s, extracting image / variance / PSF, saving and loading coadds as `.npz`, bad pixels |
 | `lsst_unet_detection/unet_model.py` | the network (identical to lsst_unet_training's) |
 | `lsst_unet_detection/detector.py` | loading a model by name; tiled inference, peaks and calibration |
-| `lsst_unet_detection/pipeline.py` | exposures → catalogue with sky coordinates |
+| `lsst_unet_detection/pipeline.py` | exposures or arrays → catalogue (with sky coordinates for exposures) and maps |
 | `lsst_unet_detection/peak_finder.py` | classical LSST-like peak finder, the comparison for the U-Net |
 | `lsst_unet_detection/review.py` | candidate lists, random-order review sessions and the review window |
 | `scripts/detect_galaxies.py` | command-line detection (optionally saving the coadd) |

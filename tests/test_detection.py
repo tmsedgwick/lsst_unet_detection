@@ -1,13 +1,17 @@
 """Checks of PSF stamps, bad-pixel handling, model lookup and the full exposure -> catalogue path, using stand-in
 objects with the afw Exposure interface (so the LSST stack is not needed) and a small untrained model."""
 
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from lsst_unet_detection import BANDS, CONFIG, detect_galaxies, detection_maps, extract_inputs, load_detector
+from lsst_unet_detection import (BANDS, CONFIG, detect_galaxies, detect_in_arrays, detection_maps, extract_inputs,
+                                 load_coadd, load_detector, save_coadd)
 from lsst_unet_detection.butler_input import neutralise_bad_pixels, psf_stamp
 from lsst_unet_detection.detector import extract_halo
 from lsst_unet_detection.pipeline import suppress_duplicates
@@ -108,6 +112,21 @@ def test_detect_galaxies_catalogue(exposures, models_root):
     assert np.allclose(catalogue["dec"], 2.0 + catalogue["y_tract"] * 0.2 / 3600)
     assert bool(catalogue["predicted_re_pix"].notna().all())
     assert {"p_detection_centroid", "galaxy_score", "star_score"} <= set(catalogue.columns)
+
+
+def test_detect_in_a_saved_coadd(exposures, models_root, tmp_path):
+    detector = load_detector("tiny", models_root, threshold=0.0)
+    save_coadd(tmp_path / "coadd.npz", exposures)
+    signal, variance, psf_kernels, origin = load_coadd(tmp_path / "coadd.npz")
+    saved = detect_in_arrays(signal, variance, psf_kernels, detector, origin)
+    from_butler = detect_galaxies(exposures, detector)
+    assert saved.equals(from_butler.drop(columns=["ra", "dec"]))  # the same, without the WCS
+    script = Path(__file__).parents[1] / "scripts" / "detect_galaxies.py"
+    subprocess.run([sys.executable, str(script), "--model", "tiny", "--models-root", str(models_root), "--coadd",
+                    str(tmp_path / "coadd.npz"), "--threshold", "0", "--out", str(tmp_path / "out.csv"), "--save-maps",
+                    str(tmp_path / "maps.npz")], check=True)
+    assert len(pd.read_csv(tmp_path / "out.csv")) > 0
+    assert list(np.load(tmp_path / "maps.npz")["origin"]) == list(CORNER)
 
 
 def test_a_model_with_centre_heads_only(exposures, models_root):

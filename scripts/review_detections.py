@@ -24,8 +24,8 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from lsst_unet_detection import CONFIG, load_detector
-from lsst_unet_detection.review import ReviewSession, ReviewWindow, build_candidates, candidates_path, load_coadd
+from lsst_unet_detection import CONFIG, load_coadd, load_detector
+from lsst_unet_detection.review import ReviewSession, ReviewWindow, build_candidates, candidates_path
 
 
 def main():
