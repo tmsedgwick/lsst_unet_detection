@@ -16,8 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
-from lsst_unet_detection import (BANDS, CONFIG, cutout_bbox, detect_galaxies, detection_maps, load_deep_coadds,
-                                 load_detector, save_coadd)
+from lsst_unet_detection import (BANDS, CONFIG, cutout_bbox, detect_galaxies, detection_maps, extract_inputs,
+                                 load_deep_coadds, load_detector, save_coadd)
 
 
 def main():
@@ -66,12 +66,14 @@ def main():
         detections.to_parquet(args.out)
     else:
         detections.to_csv(args.out, index=False)
-    print(f"{len(detections):,} detections with p_detection_centroid >= {detector.threshold:.4f} -> {args.out}")
+    band_set = detector.band_set(extract_inputs(coadds)[1])
+    print(f"{len(detections):,} detections (bands {band_set}, p_detection_centroid >= {detector.threshold:.4f}) "
+          f"-> {args.out}")
     if args.save_maps is not None:
         maps = detection_maps(coadds, detector)
         args.save_maps.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(args.save_maps, **maps, origin=np.array([coadds[BANDS[0]].getBBox().getMinX(),
-                                                                     coadds[BANDS[0]].getBBox().getMinY()]))
+        corner = next(iter(coadds.values())).getBBox()
+        np.savez_compressed(args.save_maps, **maps, origin=np.array([corner.getMinX(), corner.getMinY()]))
         print(f"Saved maps {', '.join(maps)} -> {args.save_maps}")
 
 

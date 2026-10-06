@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lsst_unet_detection import BANDS, detect_galaxies, detection_maps, extract_inputs, load_detector
+from lsst_unet_detection import BANDS, CONFIG, detect_galaxies, detection_maps, extract_inputs, load_detector
 from lsst_unet_detection.butler_input import neutralise_bad_pixels, psf_stamp
 from lsst_unet_detection.detector import extract_halo
 from lsst_unet_detection.pipeline import suppress_duplicates
@@ -72,7 +72,10 @@ def test_bad_pixels_become_noise():
     signal, variance = np.ones((6, 10, 10), np.float32), np.ones((6, 10, 10), np.float32)
     signal[0, 0, 0], variance[1, 1, 1] = np.nan, 0.0
     clean_signal, clean_variance = neutralise_bad_pixels(signal, variance)
-    assert clean_signal[0, 0, 0] == 0 and clean_variance[0, 0, 0] == 1e6 and clean_variance[1, 1, 1] == 1e6
+    assert clean_signal[0, 0, 0] == 0 and clean_variance[0, 0, 0] == CONFIG["no_data_variance"]
+    assert clean_variance[1, 1, 1] == CONFIG["no_data_variance"]
+    nothing = np.full((6, 10, 10), np.nan, np.float32)  # a band with no valid pixels is simply missing
+    assert (neutralise_bad_pixels(nothing, nothing)[1] == CONFIG["no_data_variance"]).all()
     assert np.isnan(signal[0, 0, 0])  # inputs untouched
 
 
@@ -85,6 +88,7 @@ def test_extract_inputs(exposures):
 def test_model_lookup_by_name(models_root):
     assert load_detector("tiny", models_root).name == "tiny"
     assert load_detector(str(models_root / "tiny")).threshold == 0.5
+    assert set(load_detector(str(models_root / "tiny")).calibrators) == {"ugrizy", "griz"}
     assert load_detector("tiny", models_root, threshold=0.9).threshold == 0.9
     with pytest.raises(FileNotFoundError, match="available: \\['centres', 'tiny'\\]"):
         load_detector("missing", models_root)
@@ -124,3 +128,17 @@ def test_maps_cover_the_image(exposures, models_root):
 def test_no_data_beyond_the_edge():
     patch = extract_halo(np.ones((6, 300, 300), np.float32), 0, 0, 256, 32, fill=7.0)
     assert (patch[:, :32, :] == 7.0).all() and (patch[:, 32:300, 32:300] == 1.0).all()
+
+
+def test_missing_bands(exposures, models_root):
+    some = {band: exposure for band, exposure in exposures.items() if band not in "uy"}
+    signal, variance, psf_kernels = extract_inputs(some)
+    assert (variance[[0, 5]] == CONFIG["no_data_variance"]).all() and (signal[[0, 5]] == 0).all()
+    assert np.allclose(psf_kernels[..., 0], psf_kernels[..., 5]) and np.isclose(psf_kernels[..., 0].sum(), 1.0)
+    detector = load_detector("tiny", models_root, threshold=0.0)
+    catalogue = detect_galaxies(some, detector)
+    assert len(catalogue) > 0 and set(catalogue["band_set"]) == {"griz"}
+    all_bands = detect_galaxies(exposures, detector)
+    assert set(all_bands["band_set"]) == {"ugrizy"}
+    only_gri = {band: exposure for band, exposure in exposures.items() if band in "gri"}
+    assert set(detect_galaxies(only_gri, detector)["band_set"]) == {"griz"}  # the nearest calibrated set

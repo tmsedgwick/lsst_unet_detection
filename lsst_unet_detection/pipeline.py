@@ -31,10 +31,10 @@ def detect_galaxies(exposures, detector, bands=BANDS, duplicate_radius_pix=CONFI
     raw_score, p_detection_centroid, predicted_re_pix and, for models with those heads, galaxy_score and star_score.
     """
     signal, variance, psf_kernels = extract_inputs(exposures, bands, detector.cfg["psf_stamp"])
-    signal, variance = neutralise_bad_pixels(signal, variance, CONFIG["bad_pixel_variance_factor"])
+    signal, variance = neutralise_bad_pixels(signal, variance)
     detections = suppress_duplicates(detector.detect(signal, variance, psf_kernels), duplicate_radius_pix)
 
-    reference = exposures[bands[0]]  # all bands of a coadd patch share one pixel grid and WCS
+    reference = next(exposures[band] for band in bands if band in exposures)  # bands share one pixel grid and WCS
     corner = reference.getBBox()
     detections.insert(2, "x_tract", detections["x"] + corner.getMinX())
     detections.insert(3, "y_tract", detections["y"] + corner.getMinY())
@@ -49,5 +49,5 @@ def detection_maps(exposures, detector, names=None, bands=BANDS):
     """{map name: (ny, nx) image} of the detector's maps (default: all, e.g. tidal_map) over the exposures, on the
     exposures' pixel grid."""
     signal, variance, psf_kernels = extract_inputs(exposures, bands, detector.cfg["psf_stamp"])
-    signal, variance = neutralise_bad_pixels(signal, variance, CONFIG["bad_pixel_variance_factor"])
+    signal, variance = neutralise_bad_pixels(signal, variance)
     return detector.maps(signal, variance, psf_kernels, names)

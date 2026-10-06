@@ -58,7 +58,9 @@ def main():
         if args.model is None:
             parser.error("--model is needed to start a new review")
         detector = load_detector(args.model, args.models_root, args.threshold)
-        details.update(model=detector.name, threshold=detector.threshold, min_score=args.min_score,
+        band_set = detector.band_set(variance)
+        details.update(model=detector.name, band_set=band_set, threshold=detector.threshold,
+                       min_score=args.min_score,
                        peak_threshold_sn=args.peak_sn)
         print(f"Running the U-Net ({detector.name}) and the peak finder on {args.coadd.name}...")
         detections = build_candidates(signal, variance, psf_kernels, detector, args.min_score,

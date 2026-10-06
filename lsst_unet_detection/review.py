@@ -59,13 +59,20 @@ REASON_TEXT = dict(star="star", spike="diffraction spike", bridge="bridge betwee
 
 def load_coadd(path, bands=BANDS):
     """(signal, variance, psf_kernels, origin) from an .npz with signal and variance (band, y, x), psf_kernels
-    (stamp, stamp, band), bands and optionally origin (the pixel position of the array's corner in the patch)."""
+    (stamp, stamp, band), bands and optionally origin (the pixel position of the array's corner in the patch). Bands
+    the file does not hold get "no data" and the mean of the other bands' PSF stamps."""
     data = np.load(path)
     stored = [str(band) for band in data["bands"]]
-    order = [stored.index(band) for band in bands]
+    signal, variance = np.asarray(data["signal"], np.float32), np.asarray(data["variance"], np.float32)
+    kernels = np.asarray(data["psf_kernels"], np.float32)
+    mean_stamp = kernels.mean(axis=-1)
     origin = [int(v) for v in data["origin"]] if "origin" in data.files else [0, 0]
-    return (np.asarray(data["signal"], np.float32)[order], np.asarray(data["variance"], np.float32)[order],
-            np.asarray(data["psf_kernels"], np.float32)[..., order], origin)
+    plane = lambda cube, band, fill: cube[stored.index(band)] if band in stored else np.full(cube.shape[1:], fill,
+                                                                                               np.float32)
+    return (np.stack([plane(signal, band, 0.0) for band in bands]),
+            np.stack([plane(variance, band, CONFIG["no_data_variance"]) for band in bands]),
+            np.stack([kernels[..., stored.index(band)] if band in stored else mean_stamp / mean_stamp.sum()
+                      for band in bands], axis=-1), origin)
 
 
 def match(unet_xy, peak_xy, radius):
@@ -88,7 +95,7 @@ def build_candidates(signal, variance, psf_kernels, detector, min_score=0.5, cfg
     U-Net peaks are merged within duplicate_radius_pix, keeping the highest p_detection_centroid, before they are
     split at the threshold; below-threshold peaks with p_detection_centroid < min_score are dropped.
     """
-    signal, variance = neutralise_bad_pixels(signal, variance, cfg["bad_pixel_variance_factor"])
+    signal, variance = neutralise_bad_pixels(signal, variance)
     unet = suppress_duplicates(detector.scored_peaks(signal, variance, psf_kernels), cfg["duplicate_radius_pix"])
     above = unet[SCORE_COLUMN].to_numpy(float) >= detector.threshold
     below = unet[~above & (unet[SCORE_COLUMN].to_numpy(float) >= min_score)]
