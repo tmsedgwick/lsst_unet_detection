@@ -1,17 +1,16 @@
 """Checks of PSF stamps, bad-pixel handling, model lookup and the full exposure -> catalogue path, using stand-in
 objects with the afw Exposure interface (so the LSST stack is not needed) and a small untrained model."""
 
-import json
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from lsst_unet_detection import ARTEFACTS, BANDS, CONFIG, detect_galaxies, extract_inputs, load_detector
+from lsst_unet_detection import BANDS, detect_galaxies, detection_maps, extract_inputs, load_detector
 from lsst_unet_detection.butler_input import neutralise_bad_pixels, psf_stamp
+from lsst_unet_detection.detector import extract_halo
 from lsst_unet_detection.pipeline import suppress_duplicates
-from lsst_unet_detection.unet_model import build_unet
 
 SIZE, CORNER = 300, (1000, 2000)  # image side and its tract-pixel corner
 
@@ -60,24 +59,6 @@ def exposures():
                                np.ones((SIZE, SIZE), np.float32), 2.2) for band in BANDS}
 
 
-@pytest.fixture(scope="module")
-def models_root(tmp_path_factory):
-    """A models folder holding one small untrained model, 'tiny', in the lsst_unet_training layout."""
-    root = tmp_path_factory.mktemp("models")
-    model_dir = root / "tiny"
-    model_dir.mkdir()
-    cfg = {**CONFIG, "base_filters": 8}
-    build_unet(cfg).save_weights(model_dir / ARTEFACTS["weights"])
-    normalisation = dict(logvar_centre=[0.0] * 6, logvar_scale=[1.0] * 6)
-    (model_dir / ARTEFACTS["normalisation"]).write_text(json.dumps(normalisation))
-    (model_dir / ARTEFACTS["model_config"]).write_text(json.dumps(dict(cfg=dict(base_filters=8), log_re_mean=0.8,
-                                                                       log_re_std=0.5)))
-    scores = np.linspace(0, 1, 200)
-    pd.DataFrame(dict(raw_score=scores, label_real=scores > 0.5)).to_parquet(model_dir / ARTEFACTS["calib_peaks"])
-    (model_dir / ARTEFACTS["threshold"]).write_text(json.dumps(dict(threshold=0.5)))
-    return root
-
-
 def test_psf_stamp_is_centred_unit_sum():
     yy, xx = np.mgrid[-20:21, -20:21]
     stamp = psf_stamp(np.exp(-0.5 * (xx ** 2 + yy ** 2) / 4.0))  # 41 x 41 -> cropped
@@ -105,13 +86,13 @@ def test_model_lookup_by_name(models_root):
     assert load_detector("tiny", models_root).name == "tiny"
     assert load_detector(str(models_root / "tiny")).threshold == 0.5
     assert load_detector("tiny", models_root, threshold=0.9).threshold == 0.9
-    with pytest.raises(FileNotFoundError, match="available: \\['tiny'\\]"):
+    with pytest.raises(FileNotFoundError, match="available: \\['centres', 'tiny'\\]"):
         load_detector("missing", models_root)
 
 
 def test_suppress_duplicates_keeps_best():
-    detections = pd.DataFrame(dict(x=[10.0, 11.0, 50.0], y=[10.0, 10.5, 50.0], p_real=[0.6, 0.9, 0.7]))
-    assert suppress_duplicates(detections, 3.0)["p_real"].tolist() == [0.9, 0.7]
+    detections = pd.DataFrame(dict(x=[10.0, 11.0, 50.0], y=[10.0, 10.5, 50.0], p_detection_centroid=[0.6, 0.9, 0.7]))
+    assert suppress_duplicates(detections, 3.0)["p_detection_centroid"].tolist() == [0.9, 0.7]
 
 
 def test_detect_galaxies_catalogue(exposures, models_root):
@@ -122,3 +103,24 @@ def test_detect_galaxies_catalogue(exposures, models_root):
     assert np.allclose(catalogue["x_tract"] - catalogue["x"], CORNER[0])
     assert np.allclose(catalogue["dec"], 2.0 + catalogue["y_tract"] * 0.2 / 3600)
     assert bool(catalogue["predicted_re_pix"].notna().all())
+    assert {"p_detection_centroid", "galaxy_score", "star_score"} <= set(catalogue.columns)
+
+
+def test_a_model_with_centre_heads_only(exposures, models_root):
+    detector = load_detector("centres", models_root, threshold=0.0)
+    assert detector.detection_map == "galaxy_heatmap" and detector.cfg["edge_padding"] == "reflect"
+    catalogue = detect_galaxies(exposures, detector)
+    assert len(catalogue) > 0 and "star_score" not in catalogue
+
+
+def test_maps_cover_the_image(exposures, models_root):
+    detector = load_detector("tiny", models_root)
+    maps = detection_maps(exposures, detector)
+    assert {"tidal_map", "sfregion_map", "spike_map", "detection_heatmap", "star_heatmap"} <= set(maps)
+    assert all(image.shape == (SIZE, SIZE) and np.isfinite(image).all() and (image > 0).all()
+               for image in maps.values())
+
+
+def test_no_data_beyond_the_edge():
+    patch = extract_halo(np.ones((6, 300, 300), np.float32), 0, 0, 256, 32, fill=7.0)
+    assert (patch[:, :32, :] == 7.0).all() and (patch[:, 32:300, 32:300] == 1.0).all()

@@ -6,13 +6,18 @@ Science Platform).
     # a 10' square around a position
     python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --ra 59.5 --dec -0.75 --size 3072 --out cirrus.parquet
 
-The catalogue has pixel (x, y), tract pixel (x_tract, y_tract) and sky (ra, dec) positions, p_real and raw_score.
+The catalogue has pixel (x, y), tract pixel (x_tract, y_tract) and sky (ra, dec) positions, raw_score and
+p_detection_centroid (the probability that the detection is the centre of a real galaxy or star), and for models
+with those heads galaxy_score and star_score. --save-maps also saves the model's full-image maps, e.g. tidal_map.
 """
 
 import argparse
 from pathlib import Path
 
-from lsst_unet_detection import BANDS, CONFIG, cutout_bbox, detect_galaxies, load_deep_coadds, load_detector
+import numpy as np
+
+from lsst_unet_detection import (BANDS, CONFIG, cutout_bbox, detect_galaxies, detection_maps, load_deep_coadds,
+                                 load_detector, save_coadd)
 
 
 def main():
@@ -29,7 +34,12 @@ def main():
     parser.add_argument("--repo", default=CONFIG["butler_repo"], help="Butler repository (default: %(default)s)")
     parser.add_argument("--collections", default=CONFIG["collections"], help="default: %(default)s")
     parser.add_argument("--skymap", default=CONFIG["skymap"], help="default: %(default)s")
-    parser.add_argument("--threshold", type=float, help="override the model's calibrated p_real threshold")
+    parser.add_argument("--threshold", type=float,
+                        help="override the model's calibrated p_detection_centroid threshold")
+    parser.add_argument("--save-maps", type=Path,
+                        help="also save the model's maps (e.g. tidal_map, spike_map) as an .npz on the image's grid")
+    parser.add_argument("--save-coadd", type=Path,
+                        help="also save the loaded coadd as an .npz, for scripts/review_detections.py")
     args = parser.parse_args()
     by_patch = args.tract is not None and args.patch is not None
     by_position = args.ra is not None and args.dec is not None
@@ -46,13 +56,23 @@ def main():
         tract, patch, bbox = cutout_bbox(butler, args.ra, args.dec, args.size, args.skymap)
     print(f"Loading {''.join(BANDS)} deep_coadd for tract {tract}, patch {patch}" + (f", {bbox}" if bbox else ""))
     coadds = load_deep_coadds(butler, tract, patch, bbox=bbox, skymap=args.skymap)
+    if args.save_coadd is not None:
+        args.save_coadd.parent.mkdir(parents=True, exist_ok=True)
+        save_coadd(args.save_coadd, coadds)
+        print(f"Saved the coadd -> {args.save_coadd}")
     detections = detect_galaxies(coadds, detector).assign(tract=tract, patch=patch, model=detector.name)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     if args.out.suffix == ".parquet":
         detections.to_parquet(args.out)
     else:
         detections.to_csv(args.out, index=False)
-    print(f"{len(detections):,} detections with p_real >= {detector.threshold:.4f} -> {args.out}")
+    print(f"{len(detections):,} detections with p_detection_centroid >= {detector.threshold:.4f} -> {args.out}")
+    if args.save_maps is not None:
+        maps = detection_maps(coadds, detector)
+        args.save_maps.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(args.save_maps, **maps, origin=np.array([coadds[BANDS[0]].getBBox().getMinX(),
+                                                                     coadds[BANDS[0]].getBBox().getMinY()]))
+        print(f"Saved maps {', '.join(maps)} -> {args.save_maps}")
 
 
 if __name__ == "__main__":

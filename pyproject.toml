@@ -11,7 +11,7 @@ license = "MIT"
 authors = [{ name = "Tom Sedgwick", email = "t.m.sedgwick@outlook.com" }]
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.24", "scipy>=1.10", "pandas>=2.0", "pyarrow>=14", "scikit-learn>=1.3",
-                "tensorflow>=2.16", "keras>=3.0"]
+                "tensorflow>=2.16", "keras>=3.0", "matplotlib>=3.8"]
 
 [tool.setuptools.packages.find]
 include = ["lsst_unet_detection*"]
