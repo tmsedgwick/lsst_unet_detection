@@ -32,8 +32,7 @@ def models_root(tmp_path_factory):
     def calibrate(folder, band_sets):
         pd.concat([pd.DataFrame(dict(raw_score=scores, label_real=scores > 0.5, band_set=band_set))
                    for band_set in band_sets]).to_parquet(folder / ARTEFACTS["calib_peaks"])
-        (folder / ARTEFACTS["threshold"]).write_text(json.dumps(dict(
-            band_sets={band_set: dict(threshold=0.5) for band_set in band_sets})))
+        (folder / ARTEFACTS["threshold"]).write_text(json.dumps(dict(threshold=0.5)))
 
     calibrate(model_dir, ["ugrizy", "griz"])
 

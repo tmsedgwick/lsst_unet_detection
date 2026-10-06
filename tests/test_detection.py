@@ -87,8 +87,9 @@ def test_extract_inputs(exposures):
 
 def test_model_lookup_by_name(models_root):
     assert load_detector("tiny", models_root).name == "tiny"
-    assert load_detector(str(models_root / "tiny")).thresholds == {"ugrizy": 0.5, "griz": 0.5}
-    assert set(load_detector("tiny", models_root, threshold=0.9).thresholds.values()) == {0.9}
+    assert load_detector(str(models_root / "tiny")).threshold == 0.5
+    assert set(load_detector(str(models_root / "tiny")).calibrators) == {"ugrizy", "griz"}
+    assert load_detector("tiny", models_root, threshold=0.9).threshold == 0.9
     with pytest.raises(FileNotFoundError, match="available: \\['centres', 'tiny'\\]"):
         load_detector("missing", models_root)
 

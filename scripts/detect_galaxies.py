@@ -67,8 +67,8 @@ def main():
     else:
         detections.to_csv(args.out, index=False)
     band_set = detector.band_set(extract_inputs(coadds)[1])
-    print(f"{len(detections):,} detections (bands {band_set}, p_detection_centroid >= "
-          f"{detector.thresholds[band_set]:.4f}) -> {args.out}")
+    print(f"{len(detections):,} detections (bands {band_set}, p_detection_centroid >= {detector.threshold:.4f}) "
+          f"-> {args.out}")
     if args.save_maps is not None:
         maps = detection_maps(coadds, detector)
         args.save_maps.parent.mkdir(parents=True, exist_ok=True)

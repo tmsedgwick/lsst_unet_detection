@@ -97,7 +97,7 @@ def build_candidates(signal, variance, psf_kernels, detector, min_score=0.5, cfg
     """
     signal, variance = neutralise_bad_pixels(signal, variance)
     unet = suppress_duplicates(detector.scored_peaks(signal, variance, psf_kernels), cfg["duplicate_radius_pix"])
-    above = unet[SCORE_COLUMN].to_numpy(float) >= detector.thresholds[detector.band_set(variance)]
+    above = unet[SCORE_COLUMN].to_numpy(float) >= detector.threshold
     below = unet[~above & (unet[SCORE_COLUMN].to_numpy(float) >= min_score)]
     unet = unet[above]
     peaks = find_peaks(signal, psf_kernels, threshold_sn=cfg["peak_threshold_sn"],

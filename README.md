@@ -67,8 +67,10 @@ Any subset of ugrizy works. A band the Butler has no `deep_coadd` for, or with n
 as "no data", with the mean of the other bands' PSF stamps; `extract_inputs` and `load_coadd` do this for exposures
 and saved coadds lacking a band. A model trained with a band adapter (lsst_unet_training's `train_band_adapter.py`)
 detects well with bands missing and gives exactly the same results as without the adapter when all six are present.
-The same raw score means less with fewer bands, so a model has a calibration and threshold per band set; each image
-is scored with those of its own band set, or of the calibrated set closest to it, recorded in `band_set`.
+The network's raw scores need not mean the same with fewer bands, so a model has a calibration per band set (all 63
+for a model with a band adapter); each image is scored with that of its own band set, or of the calibrated set
+closest to it, recorded in `band_set`. One threshold on `p_detection_centroid` applies to every band set: with fewer
+bands the model is less sure and fewer detections pass.
 
 ## Maps
 
