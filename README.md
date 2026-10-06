@@ -58,7 +58,17 @@ has and how it fills the area beyond the image edge ("no data", or a mirror imag
 | `raw_score` | peak height of the predicted detection heatmap |
 | `p_detection_centroid` | calibrated probability that the detection is the centre of a real galaxy or star |
 | `predicted_re_pix` | predicted half-light radius in pixels (models with a model config) |
+| `band_set` | the bands the image had (or the calibrated band set closest to them), whose calibration was used |
 | `galaxy_score`, `star_score` | the galaxy and star heatmaps at the detection: what kind of source it is (models with those heads) |
+
+## Missing bands
+
+Any subset of ugrizy works. A band the Butler has no `deep_coadd` for, or with no valid pixels, is fed to the network
+as "no data", with the mean of the other bands' PSF stamps; `extract_inputs` and `load_coadd` do this for exposures
+and saved coadds lacking a band. A model trained with a band adapter (lsst_unet_training's `train_band_adapter.py`)
+detects well with bands missing and gives exactly the same results as without the adapter when all six are present.
+The same raw score means less with fewer bands, so a model has a calibration and threshold per band set; each image
+is scored with those of its own band set, or of the calibrated set closest to it, recorded in `band_set`.
 
 ## Maps
 

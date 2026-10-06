@@ -15,11 +15,19 @@ from .config import BANDS, CONFIG
 
 def load_deep_coadds(butler, tract, patch, bands=BANDS, bbox=None, skymap=CONFIG["skymap"],
                      dataset=CONFIG["dataset"]):
-    """{band: deep_coadd exposure} for one patch, optionally cut to bbox (an lsst.geom.Box2I in tract pixels)."""
+    """{band: deep_coadd exposure} for one patch, optionally cut to bbox (an lsst.geom.Box2I in tract pixels). Bands
+    without a deep_coadd are left out (the detector then treats them as missing)."""
     parameters = {"bbox": bbox} if bbox is not None else None
-    return {band: butler.get(dataset, dict(skymap=skymap, tract=int(tract), patch=int(patch), band=band),
-                             parameters=parameters)
-            for band in bands}
+    exposures = {}
+    for band in bands:
+        try:
+            exposures[band] = butler.get(dataset, dict(skymap=skymap, tract=int(tract), patch=int(patch), band=band),
+                                         parameters=parameters)
+        except LookupError:  # the Butler's DatasetNotFoundError
+            print(f"No {dataset} in band {band} for tract {tract}, patch {patch}: treated as missing")
+    if not exposures:
+        raise LookupError(f"no {dataset} in any of the bands {bands} for tract {tract}, patch {patch}")
+    return exposures
 
 
 def cutout_bbox(butler, ra_deg, dec_deg, size_pix, skymap=CONFIG["skymap"]):
@@ -61,15 +69,23 @@ def psf_stamp(kernel, size=CONFIG["psf_stamp"]):
 
 def extract_inputs(exposures, bands=BANDS, stamp_size=CONFIG["psf_stamp"]):
     """(signal, variance, psf_kernels) from {band: exposure}: (band, y, x) float32 image and variance arrays and
-    (stamp, stamp, band) PSF stamps evaluated at the centre of the region."""
-    exposures = [exposures[band] for band in bands]
-    shapes = {exposure.image.array.shape for exposure in exposures}
+    (stamp, stamp, band) PSF stamps evaluated at the centre of the region. A band missing from exposures gets "no
+    data" (zero signal, variance no_data_variance) and the mean of the other bands' PSF stamps."""
+    present = [band for band in bands if band in exposures]
+    if not present:
+        raise ValueError("no exposures in any band")
+    shapes = {exposures[band].image.array.shape for band in present}
     if len(shapes) != 1:
         raise ValueError(f"bands have different shapes: {shapes}")
-    signal = np.stack([np.asarray(e.image.array, np.float32) for e in exposures])
-    variance = np.stack([np.asarray(e.variance.array, np.float32) for e in exposures])
-    psf_kernels = np.stack([psf_stamp(e.getPsf().computeKernelImage(e.getBBox().getCenter()).array, stamp_size)
-                            for e in exposures], axis=-1)
+    shape = shapes.pop()
+    stamps = {band: psf_stamp(exposures[band].getPsf().computeKernelImage(exposures[band].getBBox().getCenter()).array,
+                              stamp_size) for band in present}
+    mean_stamp = np.mean(list(stamps.values()), axis=0)
+    signal = np.stack([np.asarray(exposures[band].image.array, np.float32) if band in exposures
+                       else np.zeros(shape, np.float32) for band in bands])
+    variance = np.stack([np.asarray(exposures[band].variance.array, np.float32) if band in exposures
+                         else np.full(shape, CONFIG["no_data_variance"], np.float32) for band in bands])
+    psf_kernels = np.stack([stamps.get(band, mean_stamp / mean_stamp.sum()) for band in bands], axis=-1)
     return signal, variance, psf_kernels
 
 
@@ -77,19 +93,16 @@ def save_coadd(path, exposures, bands=BANDS, stamp_size=CONFIG["psf_stamp"]):
     """Save {band: exposure} as an .npz with signal, variance, psf_kernels, bands and origin (the tract pixel of the
     array's corner), the input of scripts/review_detections.py."""
     signal, variance, psf_kernels = extract_inputs(exposures, bands, stamp_size)
-    corner = exposures[bands[0]].getBBox()
+    corner = next(exposures[band] for band in bands if band in exposures).getBBox()
     np.savez(path, signal=signal, variance=variance, psf_kernels=psf_kernels, bands=np.array(bands),
              origin=np.array([corner.getMinX(), corner.getMinY()]))
 
 
-def neutralise_bad_pixels(signal, variance, factor=CONFIG["bad_pixel_variance_factor"]):
-    """Copies of signal and variance with NaN / non-positive-variance pixels set to zero signal and a huge variance
-    (factor x the band's 99.9th-percentile variance), so they read as pure noise instead of spreading NaNs."""
+def neutralise_bad_pixels(signal, variance, no_data_variance=CONFIG["no_data_variance"]):
+    """Copies of signal and variance with NaN / non-positive-variance pixels (NO_DATA, chip gaps) set to "no data":
+    zero signal and variance no_data_variance, as the network was trained to read missing data. A band with no valid
+    pixels at all is then simply a missing band."""
     signal, variance = signal.copy(), variance.copy()
-    for i in range(len(signal)):
-        good = np.isfinite(signal[i]) & np.isfinite(variance[i]) & (variance[i] > 0)
-        if not good.any():
-            raise ValueError(f"band {i} has no valid pixels")
-        signal[i][~good] = 0.0
-        variance[i][~good] = max(float(np.nanpercentile(variance[i][good], 99.9)) * factor, 1.0)
+    bad = ~(np.isfinite(signal) & np.isfinite(variance) & (variance > 0))
+    signal[bad], variance[bad] = 0.0, no_data_variance
     return signal, variance

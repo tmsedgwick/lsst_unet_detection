@@ -15,14 +15,14 @@ CONFIG: dict[str, Any] = dict(
     # Beyond the image edge a tile holds "no data" (zero signal, variance no_data_variance), as in training, or with
     # edge_padding="reflect" a mirror image of the image.
     edge_padding="no_data", no_data_variance=1e12,
+    # Missing bands are fed as "no data" too; a model with a band adapter (band_adapter, adapter_filters) is trained
+    # to detect well without them, and each band set has its own calibration and threshold.
+    band_adapter=False, adapter_filters=32,
     # Peak finding on the predicted detection heatmap.
     min_peak_score=0.03,  # local maxima below this are noise-floor bumps
     max_peaks_per_tile=512,
     infer_batch=16,  # tiles per network call
     duplicate_radius_pix=3.0,  # detections closer than this are merged, keeping the highest p_detection_centroid
-    # Pixels with NaN or non-positive variance (NO_DATA, chip gaps) get zero signal and this multiple of the band's
-    # 99.9th-percentile variance, so the network ignores them.
-    bad_pixel_variance_factor=1e6,
     # Classical peak finder (peak_finder.py), the comparison for the U-Net: S/N threshold on the PSF-smoothed image,
     # footprint growth in PSF widths, the radius within which peaks from different bands are one detection, and the
     # box size of the local background used to split crowded footprints.

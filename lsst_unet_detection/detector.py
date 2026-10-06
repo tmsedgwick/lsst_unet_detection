@@ -1,8 +1,13 @@
 """Load a trained U-Net by name and run it over a whole multiband image.
 
 A model folder holds the weights, the input normalisation, the calib peaks (the score -> p_detection_centroid
-calibration is refitted from them), the threshold and the model config, which says which heads the model has and how
-it fills the area beyond the image edge.
+calibration is refitted from them), the thresholds and the model config, which says which heads the model has, how
+it fills the area beyond the image edge and whether it has a band adapter.
+
+Bands without data (missing from the coadd, or with no valid pixels) are fed as "no data". The same raw score means
+less with fewer bands, so the model has a calibration and a threshold per band set (e.g. ugrizy, griz); an image is
+scored with those of its own band set, or of the calibrated set closest to it, recorded in each detection's
+band_set.
 
 The image is cut into tile_size tiles, each read with a tile_halo border of context; beyond the image edge the border
 holds "no data" (zero signal, a huge variance) or, if the model config says so, a mirror image. Per band the network
@@ -28,6 +33,14 @@ from .config import ARTEFACTS, BANDS, CONFIG
 from .unet_model import build_unet
 
 SCORE_COLUMN = "p_detection_centroid"
+
+
+def nearest_band_set(band_set, calibrated):
+    """band_set if it was calibrated, else the calibrated set sharing the most bands with it (then the one with the
+    fewest bands it lacks)."""
+    if band_set in calibrated:
+        return band_set
+    return max(calibrated, key=lambda other: (len(set(other) & set(band_set)), -len(set(other) - set(band_set))))
 
 
 def resolve_model_dir(model, models_root=None):
@@ -81,9 +94,10 @@ class Detector:
     """A trained, calibrated U-Net: detect(signal, variance, psf_kernels) -> DataFrame of detections, and
     maps(...) -> its full-image maps."""
 
-    def __init__(self, model, normalisation, calibrator, threshold, cfg, log_re_scaling=None, name=""):
-        self.model, self.normalisation, self.calibrator = model, normalisation, calibrator
-        self.threshold, self.cfg, self.log_re_scaling, self.name = threshold, cfg, log_re_scaling, name
+    def __init__(self, model, normalisation, calibrators, thresholds, cfg, log_re_scaling=None, name=""):
+        """calibrators and thresholds are {band set: isotonic calibrator} and {band set: p_detection_centroid cut}."""
+        self.model, self.normalisation, self.calibrators = model, normalisation, calibrators
+        self.thresholds, self.cfg, self.log_re_scaling, self.name = thresholds, cfg, log_re_scaling, name
         outputs = set(model.output_names)
         self.detection_map = "detection_heatmap" if "detection_heatmap" in outputs else "galaxy_heatmap"
         self.kind_maps = [name for name in ("galaxy_heatmap", "star_heatmap")
@@ -145,19 +159,30 @@ class Detector:
                          *[float(kind[y, x]) for kind in kinds]))
         return rows
 
+    def band_set(self, variance):
+        """The calibrated band set an image is scored with: the bands with data in it, or the calibrated set closest
+        to them."""
+        has_data = (np.isfinite(variance) & (variance > 0) & (variance < 0.1 * self.cfg["no_data_variance"]))
+        present = "".join(band for band, data in zip(BANDS, has_data.any(axis=(1, 2))) if data)
+        return nearest_band_set(present, self.thresholds)
+
     def scored_peaks(self, signal, variance, psf_kernels):
-        """Every detection-map peak above min_peak_score with its p_detection_centroid, whether or not it passes the
-        threshold."""
+        """Every detection-map peak above min_peak_score with its p_detection_centroid (from the calibration of the
+        image's band set, recorded in band_set), whether or not it passes the threshold."""
+        band_set = self.band_set(variance)
         peaks = self.raw_peaks(signal, variance, psf_kernels)
-        peaks.insert(3, SCORE_COLUMN, self.calibrator.predict(peaks["raw_score"]) if len(peaks) else np.empty(0))
-        return peaks
+        calibrated = self.calibrators[band_set].predict(peaks["raw_score"]) if len(peaks) else np.empty(0)
+        peaks.insert(3, SCORE_COLUMN, calibrated)
+        return peaks.assign(band_set=band_set)
 
     def detect(self, signal, variance, psf_kernels):
-        """Detections with p_detection_centroid >= threshold: x, y (array pixels), raw_score, p_detection_centroid,
-        predicted_re_pix (when the model knows its size scaling) and galaxy_score / star_score (when it has those
-        heads). signal and variance are (band, y, x) in nJy; psf_kernels is (stamp, stamp, band)."""
+        """Detections with p_detection_centroid at least the threshold of the image's band set: x, y (array pixels),
+        raw_score, p_detection_centroid, predicted_re_pix (when the model knows its size scaling), galaxy_score /
+        star_score (when it has those heads) and band_set. signal and variance are (band, y, x) in nJy, with "no
+        data" where a band has none; psf_kernels is (stamp, stamp, band)."""
         peaks = self.scored_peaks(signal, variance, psf_kernels)
-        return peaks.loc[peaks[SCORE_COLUMN].to_numpy(float) >= self.threshold].reset_index(drop=True)
+        threshold = self.thresholds[self.band_set(variance)]
+        return peaks.loc[peaks[SCORE_COLUMN].to_numpy(float) >= threshold].reset_index(drop=True)
 
     def maps(self, signal, variance, psf_kernels, names=None):
         """{map name: (ny, nx) float32 image} of the model's maps (default: all of them, e.g. galaxy_heatmap,
@@ -176,14 +201,14 @@ class Detector:
 
 def load_detector(model, models_root=None, threshold=None):
     """Load a trained model by folder or by name under models_root. threshold overrides the calibrated
-    p_detection_centroid cut."""
+    p_detection_centroid cut of every band set."""
     model_dir = resolve_model_dir(model, models_root)
     config_path = model_dir / ARTEFACTS["model_config"]
     if not config_path.exists():
         raise FileNotFoundError(f"{model_dir} has no {ARTEFACTS['model_config']}: is it a model folder written by "
                                 "lsst_unet_training?")
     model_config = json.loads(config_path.read_text())
-    missing = [key for key in ("heads", "edge_padding") if key not in model_config["cfg"]]
+    missing = [key for key in ("heads", "edge_padding", "band_adapter") if key not in model_config["cfg"]]
     if missing:
         raise ValueError(f"{config_path} does not give {', '.join(missing)}")
     cfg = {**CONFIG, **model_config["cfg"]}
@@ -191,12 +216,15 @@ def load_detector(model, models_root=None, threshold=None):
     network = build_unet(cfg)
     network.load_weights(model_dir / ARTEFACTS["weights"])
     normalisation = json.loads((model_dir / ARTEFACTS["normalisation"]).read_text())
-    calib_peaks = pd.read_parquet(model_dir / ARTEFACTS["calib_peaks"], columns=["raw_score", "label_real"])
-    calibrator = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
-    calibrator.fit(calib_peaks["raw_score"], calib_peaks["label_real"].astype(int))
-    if threshold is None:
-        threshold = float(json.loads((model_dir / ARTEFACTS["threshold"]).read_text())["threshold"])
+    calib_peaks = pd.read_parquet(model_dir / ARTEFACTS["calib_peaks"], columns=["raw_score", "label_real", "band_set"])
+    calibrators = {}
+    for band_set, peaks in calib_peaks.groupby("band_set"):
+        calibrators[band_set] = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
+        calibrators[band_set].fit(peaks["raw_score"], peaks["label_real"].astype(int))
+    band_sets = json.loads((model_dir / ARTEFACTS["threshold"]).read_text())["band_sets"]
+    thresholds = {band_set: float(row["threshold"] if threshold is None else threshold)
+                  for band_set, row in band_sets.items()}
     scaling = (model_config["log_re_mean"], model_config["log_re_std"]) if "log_re_mean" in model_config else None
     if len(normalisation["logvar_centre"]) != len(BANDS):
         raise ValueError(f"model expects {len(normalisation['logvar_centre'])} bands, not {len(BANDS)}")
-    return Detector(network, normalisation, calibrator, threshold, cfg, scaling, name=model_dir.name)
+    return Detector(network, normalisation, calibrators, thresholds, cfg, scaling, name=model_dir.name)
