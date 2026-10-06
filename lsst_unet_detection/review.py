@@ -31,6 +31,7 @@ continues with exactly the same candidates and order, without running the detect
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -73,6 +74,7 @@ def match(unet_xy, peak_xy, radius):
     unet_matched, peak_matched = np.zeros(len(unet_xy), bool), np.zeros(len(peak_xy), bool)
     if len(unet_xy) and len(peak_xy):
         distance, nearest = KDTree(peak_xy).query(unet_xy, k=1)
+        nearest = np.asarray(nearest)
         unet_matched = np.isfinite(distance) & (distance <= radius)
         peak_matched[nearest[unet_matched]] = True
     return unet_matched, peak_matched
@@ -128,7 +130,7 @@ class ReviewSession:
         self.detection_to_candidate = {int(d): c for c, d in enumerate(self.candidate_detection_ids)}
         self.candidates = self.detections[self.detections["category"] == category].reset_index(drop=True)
         if self.path.exists():
-            self.feedback = json.loads(self.path.read_text())
+            self.feedback: dict[str, Any] = json.loads(self.path.read_text())
             if self.feedback.get("category") != category or self.feedback.get("order") != "random":
                 raise ValueError(f"{self.path} holds a {self.feedback.get('order', 'non-random')}-order review of "
                                  f"{self.feedback.get('category')!r}; choose another --out for a random-order review "

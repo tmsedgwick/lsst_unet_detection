@@ -77,6 +77,7 @@ def test_session_random_order_save_and_resume(tmp_path):
     assert candidates_path(out).exists() and len(session.order) == 30
     assert session.order.tolist() != list(range(30))  # shuffled
     first = session.next_unreviewed()
+    assert first is not None
     session.decide(first, "real")
     session.decide(first + 1, "spurious")
     session.add_missed(5.0, 6.0, first)
