@@ -276,8 +276,8 @@ class ReviewWindow:
     def __init__(self, session, signal, variance, psf_kernels, bands=BANDS):
         import matplotlib.pyplot as plt
 
-        for key in [k for k in plt.rcParams if k.startswith("keymap.")]:
-            plt.rcParams[key] = []  # free every key from matplotlib's default shortcuts (s = save, q = quit, ...)
+        # Free every key from matplotlib's default shortcuts (s = save, q = quit, ...).
+        plt.rcParams.update({key: [] for key in plt.rcParams.keys() if key.startswith("keymap.")})
         self.session, self.signal, self.variance = session, signal, variance
         self.colour_bands = [bands.index(band) for band in ("g", "r", "i")]
         self.sigma = float(np.median([psf_sigma_pix(psf_kernels[..., b]) for b in range(len(bands))]))
@@ -338,7 +338,8 @@ class ReviewWindow:
         colour = [signal[b] for b in self.colour_bands]
         for ax in self.axes:
             ax.clear()
-        self.axes[0].imshow(colour_image(*colour, *colour_range), origin="lower", extent=extent)
+        (g, r, i), (low, high) = colour, colour_range
+        self.axes[0].imshow(colour_image(g, r, i, low, high), origin="lower", extent=extent)
         for ax, image, reference, title in [
                 (self.axes[1], stacked, reference_snr[0], "S/N, all bands combined"),
                 (self.axes[2], filtered, reference_snr[1], f"S/N after PSF-matched filter (σ = {self.sigma:.1f} px)")]:

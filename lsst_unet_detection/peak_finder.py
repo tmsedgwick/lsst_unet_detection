@@ -63,7 +63,7 @@ def coarse_background(image, bin_pix):
         return np.full_like(image, np.median(image))
     n_y, n_x = ny // bin_pix, nx // bin_pix
     medians = np.median(image[:n_y * bin_pix, :n_x * bin_pix].reshape(n_y, bin_pix, n_x, bin_pix), axis=(1, 3))
-    return zoom(medians, (ny / n_y, nx / n_x), order=1, mode="nearest")[:ny, :nx]
+    return np.asarray(zoom(medians, (ny / n_y, nx / n_x), order=1, mode="nearest"))[:ny, :nx]
 
 
 def local_maxima(smoothed, sn, mask):
@@ -79,8 +79,8 @@ def band_peaks(image, sigma, threshold_sn, grow_sigmas, background_bin_pix):
     sn = smoothed / max(clipped_scatter(smoothed), 1e-30)
     above = sn >= threshold_sn
     grow_pix = max(0, int(round(grow_sigmas * sigma)))
-    footprints, _ = label(binary_dilation(above, iterations=grow_pix) if grow_pix else above,
-                          structure=np.ones((3, 3), int))
+    labelled = label(binary_dilation(above, iterations=grow_pix) if grow_pix else above, structure=np.ones((3, 3), int))
+    footprints = labelled[0]  # label returns (labels, count)  # pyright: ignore[reportIndexIssue]
     peaks = local_maxima(smoothed, sn, above)
     peaks["footprint"] = footprints[peaks["y"].astype(int), peaks["x"].astype(int)]
     peaks = peaks[peaks["footprint"] > 0]

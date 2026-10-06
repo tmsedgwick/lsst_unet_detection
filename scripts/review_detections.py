@@ -22,6 +22,7 @@ The reasons are saved with the labels; lsst_unet_training's update uses them (e.
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from lsst_unet_detection import CONFIG, load_detector
 from lsst_unet_detection.review import ReviewSession, ReviewWindow, build_candidates, candidates_path, load_coadd
@@ -51,7 +52,7 @@ def main():
     args = parser.parse_args()
 
     signal, variance, psf_kernels, origin = load_coadd(args.coadd)
-    details = dict(coadd=str(args.coadd), origin=origin)
+    details: dict[str, Any] = dict(coadd=str(args.coadd), origin=origin)
 
     def make_detections():
         if args.model is None:
