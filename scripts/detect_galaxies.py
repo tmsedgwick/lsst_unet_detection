@@ -7,6 +7,8 @@
     python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --ra 59.5 --dec -0.75 --size 3072 --out cirrus.parquet
     # a coadd saved as .npz, without the LSST stack
     python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --coadd cirrus.npz --out cirrus.parquet
+    # with the published model, downloaded first if it is not in --models-root yet
+    python scripts/detect_galaxies.py --model mep_unet_v1 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
 
 The catalogue has pixel (x, y), tract pixel (x_tract, y_tract) and, from the Butler, sky (ra, dec) positions, raw_score and
 p_detection_centroid (the probability that the detection is the centre of a real galaxy or star), and for models
@@ -19,14 +21,17 @@ from pathlib import Path
 import numpy as np
 
 from lsst_unet_detection import (BANDS, CONFIG, cutout_bbox, detect_galaxies, detect_in_arrays, detection_maps,
-                                 extract_inputs, load_coadd, load_deep_coadds, load_detector, maps_of_arrays,
-                                 save_coadd)
+                                 download_model, extract_inputs, load_coadd, load_deep_coadds, load_detector,
+                                 maps_of_arrays, save_coadd)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="model folder, or its name inside --models-root")
     parser.add_argument("--models-root", type=Path, help="folder holding one sub-folder per trained model")
+    parser.add_argument("--download", action="store_true",
+                        help="download the published model --model into --models-root first, if it is not there yet "
+                             "(see scripts/download_model.py --list)")
     parser.add_argument("--out", type=Path, required=True, help="output catalogue (.parquet or .csv)")
     where = parser.add_argument_group("where to look: --tract and --patch, or --ra, --dec and --size, or --coadd")
     where.add_argument("--tract", type=int)
@@ -51,6 +56,11 @@ def main():
         parser.error("give one of: --tract and --patch, --ra and --dec, or --coadd")
     if args.coadd is not None and args.save_coadd is not None:
         parser.error("--save-coadd saves a coadd read from the Butler; --coadd is one already saved")
+    if args.download and args.models_root is None:
+        parser.error("--download needs --models-root, the folder to put the model in")
+
+    if args.download:
+        download_model(args.model, args.models_root)
 
     detector = load_detector(args.model, args.models_root, args.threshold)
     if args.coadd is not None:

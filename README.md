@@ -32,6 +32,28 @@ detections = detect_galaxies(coadds, detector)                     # DataFrame: 
 5. **Remove duplicates** within 3 pixels, keeping the highest `p_detection_centroid`.
 6. **Add coordinates**: tract pixel positions and RA/Dec from the coadd WCS.
 
+## Getting a trained model
+
+You do not need to train your own: download the published one, ready to load by name.
+
+```bash
+python scripts/download_model.py --list
+python scripts/download_model.py --model mep_unet_v1 --models-root ~/unet_models
+```
+
+or let the detection script fetch it the first time:
+
+```bash
+python scripts/detect_galaxies.py --model mep_unet_v1 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
+```
+
+| Model | What it is |
+|---|---|
+| `mep_unet_v1` | six-band (ugrizy) U-Net, threshold set for 99% purity on its mocks; no band adapter, so give it all six bands |
+
+The model is a zip attached to a release of this repository; its SHA-256 is checked before it is unpacked
+(`lsst_unet_detection/published_models.py`). In Python: `download_model("mep_unet_v1", "~/unet_models")`.
+
 ## Choosing a model
 
 A model is a folder written by lsst_unet_training (weights, input normalisation, calib peaks, threshold, model
