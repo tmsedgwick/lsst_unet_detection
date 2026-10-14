@@ -133,8 +133,9 @@ def detection_head(features, maps, base_filters):
 
 
 def band_coverage(image_planes):
-    """(H, W, n_band) 1 where a band has data, from the log-variance planes (every second input plane)."""
-    return keras.ops.cast(image_planes[..., 1::2] < COVERED_BELOW, "float32")
+    """(H, W, n_band) 1 where a band has data, from the log-variance planes (every second one of the first
+    2 x n_band input planes; further stretches follow them)."""
+    return keras.ops.cast(image_planes[..., 1:2 * len(BANDS):2] < COVERED_BELOW, "float32")
 
 
 def missing_fraction(image_planes):
@@ -182,7 +183,8 @@ def build_unet(cfg):
     """The detector as a Keras model with inputs image_planes and psf_kernels and one output per head (cfg["heads"],
     plus centroid_offset and source_structure)."""
     filters, input_size = cfg["base_filters"], cfg["tile_size"] + 2 * cfg["tile_halo"]
-    image_in = layers.Input((input_size, input_size, 2 * len(BANDS)), name="image_planes")
+    image_in = layers.Input((input_size, input_size, len(BANDS) * (1 + len(cfg["snr_stretches"]))),
+                            name="image_planes")
     psf_in = layers.Input((cfg["psf_stamp"], cfg["psf_stamp"], len(BANDS)), name="psf_kernels")
     psf_embedding = psf_encoder(psf_in)
 
@@ -216,5 +218,7 @@ def build_unet(cfg):
             outputs[name] = heatmap_head(dec1, filters, name)
     if "detection_heatmap" in heads:
         outputs["detection_heatmap"] = detection_head(dec1, outputs, filters)
+    if "extended_heatmap" in heads:  # after the detection head, which it does not feed
+        outputs["extended_heatmap"] = heatmap_head(dec1, filters, "extended_heatmap")
     return models.Model(inputs={"image_planes": image_in, "psf_kernels": psf_in}, outputs=outputs,
                         name="mep_multiband_unet")
