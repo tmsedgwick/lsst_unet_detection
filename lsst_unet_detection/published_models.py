@@ -4,8 +4,8 @@ Each published model is a zip of one model folder (weights, normalisation, model
 attached to a release of this repository. download_model fetches it into a models folder, checks its SHA-256 and
 unpacks it, so it can then be loaded by name like any other model:
 
-    download_model("mep_unet_v1", "~/unet_models")
-    detector = load_detector("mep_unet_v1", models_root="~/unet_models")
+    download_model("mep_unet_v4", "~/unet_models")
+    detector = load_detector("mep_unet_v4", models_root="~/unet_models")
 """
 
 import hashlib
@@ -24,6 +24,12 @@ PUBLISHED_MODELS = {
         url=f"{RELEASES}/mep_unet_v1/mep_unet_v1.zip",
         sha256="21aae27833b3a08a4afa9aadc852b06a9d9c41b24eea0a19b00d98d40202a899",
         about="six-band U-Net (ugrizy), threshold for 99% purity on the July mocks; no band adapter",
+    ),
+    "mep_unet_v4": dict(
+        url=f"{RELEASES}/mep_unet_v4/mep_unet_v4.zip",
+        sha256="2fc0a3a4a1e209fe6a9a232b5e7c897b9a6fd8f0d992a098835f924501f64860",
+        about="six-band U-Net (ugrizy), class-balanced so completeness follows S/N across source classes; two input "
+              "stretches, extended-galaxy head; threshold for 99% purity",
     ),
 }
 
