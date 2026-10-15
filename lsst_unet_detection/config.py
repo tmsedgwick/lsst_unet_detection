@@ -12,6 +12,9 @@ CONFIG: dict[str, Any] = dict(
     # Tiling and network (must match how the model was trained; a model's config says how it was).
     tile_size=256, tile_halo=32, psf_stamp=25, base_filters=24,
     heads=("galaxy_heatmap", "star_heatmap", "sfregion_map", "tidal_map", "spike_map", "detection_heatmap"),
+    # Input stretches: per band arcsinh(S/N / s) for each s, plus the log variance (see detector.encode_planes). Models
+    # trained with a gentler second stretch, e.g. (3, 100), give it in their config; (3,) is the original input.
+    snr_stretches=(3.0,),
     # Beyond the image edge a tile holds "no data" (zero signal, variance no_data_variance), as in training, or with
     # edge_padding="reflect" a mirror image of the image.
     edge_padding="no_data", no_data_variance=1e12,

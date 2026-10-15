@@ -1,8 +1,8 @@
 """Download a published trained model into a models folder, ready to load by name.
 
     python scripts/download_model.py --list
-    python scripts/download_model.py --model mep_unet_v1 --models-root ~/unet_models
-    python scripts/detect_galaxies.py --model mep_unet_v1 --models-root ~/unet_models --coadd cirrus.npz --out cirrus.parquet
+    python scripts/download_model.py --model mep_unet_v3 --models-root ~/unet_models
+    python scripts/detect_galaxies.py --model mep_unet_v3 --models-root ~/unet_models --coadd cirrus.npz --out cirrus.parquet
 """
 
 import argparse

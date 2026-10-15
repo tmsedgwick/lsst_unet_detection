@@ -57,16 +57,19 @@ def resolve_model_dir(model, models_root=None):
                                                      if models_root is not None else ""))
 
 
-def encode_planes(signal, variance, normalisation):
-    """(band, H, W) signal and variance -> (H, W, 2 * n_band) network input: per band arcsinh(S/N / 3) and the
-    normalised log variance, both clipped to +-8."""
-    channels = []
+def encode_planes(signal, variance, normalisation, stretches=(3.0,)):
+    """(band, H, W) signal and variance -> (H, W, n_band * (1 + len(stretches))) network input: per band
+    arcsinh(S/N / stretches[0]) and the normalised log variance, then for each further stretch s, per band
+    arcsinh(S/N / s); all clipped to +-8 (the same planes as lsst_unet_training's encode_planes)."""
+    channels, extra = [], []
     for i in range(len(signal)):
         var = np.maximum(np.nan_to_num(variance[i], nan=1e-12), 1e-12)
         sig = np.nan_to_num(signal[i], nan=0.0, posinf=0.0, neginf=0.0)
-        snr = np.arcsinh((sig / np.sqrt(var)) / 3.0)
+        snr = sig / np.sqrt(var)
         log_var = (np.log(var) - normalisation["logvar_centre"][i]) / normalisation["logvar_scale"][i]
-        channels += [np.clip(snr, -8, 8), np.clip(log_var, -8, 8)]
+        channels += [np.clip(np.arcsinh(snr / stretches[0]), -8, 8), np.clip(log_var, -8, 8)]
+        extra.append([np.clip(np.arcsinh(snr / s), -8, 8) for s in stretches[1:]])
+    channels += [planes[k] for k in range(len(stretches) - 1) for planes in extra]
     return np.stack(channels, axis=-1).astype(np.float32)
 
 
@@ -116,7 +119,7 @@ class Detector:
             images = np.stack([encode_planes(extract_halo(signal, x0, y0, size, halo, 0.0 if no_data else None),
                                              extract_halo(variance, x0, y0, size, halo,
                                                           cfg["no_data_variance"] if no_data else None),
-                                             self.normalisation)
+                                             self.normalisation, cfg["snr_stretches"])
                                for x0, y0 in batch])
             predictions = self.model.predict_on_batch({"image_planes": images,
                                                        "psf_kernels": np.repeat(psf_kernels[None], len(batch), axis=0)})

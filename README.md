@@ -38,21 +38,42 @@ You do not need to train your own: download the published one, ready to load by 
 
 ```bash
 python scripts/download_model.py --list
-python scripts/download_model.py --model mep_unet_v1 --models-root ~/unet_models
+python scripts/download_model.py --model mep_unet_v3 --models-root ~/unet_models
 ```
 
 or let the detection script fetch it the first time:
 
 ```bash
-python scripts/detect_galaxies.py --model mep_unet_v1 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
+python scripts/detect_galaxies.py --model mep_unet_v3 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
 ```
 
 | Model | What it is |
 |---|---|
-| `mep_unet_v1` | six-band (ugrizy) U-Net, threshold set for 99% purity on its mocks; no band adapter, so give it all six bands |
+| `mep_unet_v3` | **recommended.** Six-band (ugrizy) U-Net trained with class-balanced weights, so that its completeness depends on a source's signal-to-noise and much less on what kind of source it is; two input stretches and an extended-galaxy head. Threshold set for 99% purity on its mocks; give it all six bands |
+| `mep_unet_v1` | the first six-band (ugrizy) U-Net, threshold set for 99% purity on its mocks; give it all six bands |
 
-The model is a zip attached to a release of this repository; its SHA-256 is checked before it is unpacked
-(`lsst_unet_detection/published_models.py`). In Python: `download_model("mep_unet_v1", "~/unet_models")`.
+On a held-out 10-year mock coadd at 99% purity, `mep_unet_v3` finds 66% of the galaxies above 5σ (`mep_unet_v1`:
+62%), and many more of the resolved and low-surface-brightness ones. Completeness above 5σ (number of sources in
+brackets):
+
+| Above 5σ, 99% purity | `mep_unet_v1` | `mep_unet_v3` |
+|---|---|---|
+| all galaxies (39,688) | 0.62 | 0.66 |
+| unresolved galaxies (37,224) | 0.64 | 0.68 |
+| resolved galaxies (2,464) | 0.26 | 0.37 |
+| resolved galaxies, S/N > 50 (629) | 0.48 | 0.72 |
+| ultra-diffuse galaxies (59) | 0.08 | 0.46 |
+| extended dwarf irregulars (74) | 0.12 | 0.58 |
+| resolved spirals (170) | 0.56 | 0.68 |
+| stars (445) | 0.70 | 0.92 |
+
+Its completeness also depends much less on the kind of galaxy at a given S/N: the mean gap between a class's
+completeness and that of all sources at the same S/N is 0.17, against 0.35 for `mep_unet_v1`. Almost-dark galaxies
+(gas-rich, nearly starless) are not found by either. How the model was trained is described in lsst_unet_training's
+README.
+
+The models are zips attached to releases of this repository; their SHA-256 is checked before they are unpacked
+(`lsst_unet_detection/published_models.py`). In Python: `download_model("mep_unet_v3", "~/unet_models")`.
 
 ## Choosing a model
 
@@ -68,7 +89,9 @@ config). Keep your models side by side in one folder and pick one by name:
 `load_detector("mep_unet", models_root="~/unet_models")` loads `~/unet_models/mep_unet`; you can also pass the
 folder path directly. A mistyped name lists the models that are available. Pass `threshold=` to override the
 calibrated `p_detection_centroid` cut, e.g. to trade purity for completeness. A model's config says which heads it
-has and how it fills the area beyond the image edge ("no data", or a mirror image with `edge_padding="reflect"`).
+has, which input stretches it takes (`snr_stretches`: per band arcsinh(S/N / s) for each s, e.g. (3, 100) for
+`mep_unet_v3`, (3,) for `mep_unet_v1`) and how it fills the area beyond the image edge ("no data", or a mirror image
+with `edge_padding="reflect"`).
 
 ## Output catalogue
 
