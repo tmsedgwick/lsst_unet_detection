@@ -8,7 +8,7 @@
     # a coadd saved as .npz, without the LSST stack
     python scripts/detect_galaxies.py --model mep_unet --models-root ~/unet_models --coadd cirrus.npz --out cirrus.parquet
     # with the published model, downloaded first if it is not in --models-root yet
-    python scripts/detect_galaxies.py --model mep_unet_v1 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
+    python scripts/detect_galaxies.py --model mep_unet_v3 --models-root ~/unet_models --download --coadd cirrus.npz --out cirrus.parquet
 
 The catalogue has pixel (x, y), tract pixel (x_tract, y_tract) and, from the Butler, sky (ra, dec) positions, raw_score and
 p_detection_centroid (the probability that the detection is the centre of a real galaxy or star), and for models
